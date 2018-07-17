@@ -219,7 +219,7 @@ let format_stats_m_f2 l1 l2 title series1 series2 =
       l2
   in
   let labels = List.map (fun (k, _) -> k) l1 @ List.map (fun (k, _) -> k) l2 in
-  let labels = List.sort compare (list_uniq labels) in
+  let labels = List.sort_uniq compare labels in
   let ht_labels = Hashtbl.create (List.length labels) in
   let () =
     let rec loop i l =

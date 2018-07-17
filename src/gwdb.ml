@@ -1273,7 +1273,7 @@ value base2 db2 =
            if Name.crush_lower (proj p) = s then [proj p :: sl] else sl)
         db2.patches.h_person []
     in
-    let sl = Mutil.list_uniq (List.sort compare sl) in
+    let sl = List.sort_uniq compare sl in
     List.fold_left (fun istrl s -> [Istr2New db2 s :: istrl]) istrl sl
   in
   self where rec self =

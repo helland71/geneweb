@@ -362,7 +362,7 @@ value first_name_print conf base x =
   match list with
   [ [] -> first_name_not_found conf x
   | [(_, (strl, iperl))] ->
-      let iperl = Mutil.list_uniq (List.sort compare iperl) in
+      let iperl = List.sort_uniq compare iperl in
       let pl = List.map (pget conf base) iperl in
       let pl =
         List.fold_right
@@ -1040,7 +1040,7 @@ value search_first_name_print conf base x =
   match list with
   [ [] -> first_name_not_found conf x
   | [(_, (strl, iperl))] ->
-      let iperl = Mutil.list_uniq (List.sort compare iperl) in
+      let iperl = List.sort_uniq compare iperl in
       let pl = List.map (pget conf base) iperl in
       let pl =
         List.fold_right

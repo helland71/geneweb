@@ -536,7 +536,7 @@ value print_places_list conf base t t_equiv list = do {
 
 value print_places conf base t =
   let (l, t, t_equiv) = select_title conf base t in
-  let list = string_list_uniq (List.sort compare_places l) in
+  let list = List.sort_uniq compare_places l in
   match list with
   [ [p] -> print_title_place conf base t p
   | _ -> print_places_list conf base t t_equiv list ]
@@ -544,7 +544,7 @@ value print_places conf base t =
 
 value print_titles conf base p =
   let (l, p) = select_place conf base p in
-  let list = string_list_uniq (List.sort compare_titles l) in
+  let list = List.sort_uniq compare_titles l in
   let title _ = Wserver.printf "... %s" p in
   do {
     Hutil.header conf title;
@@ -586,7 +586,7 @@ value print_all_places conf base = do {
   in
   let list =
     let l = select_all_places conf base in
-    string_list_uniq (List.sort compare_places l)
+    List.sort_uniq compare_places l
   in
   Hutil.header conf title;
   tag "ul" begin

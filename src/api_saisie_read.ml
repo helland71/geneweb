@@ -1056,7 +1056,7 @@ let pers_to_piqi_person conf base p =
             in
             loop 0
           in
-          let related = Mutil.list_uniq (List.sort compare gen_p.related) in
+          let related = List.sort_uniq compare gen_p.related in
           let events_witnesses =
             let list = ref [] in
             let rec make_list =
@@ -1180,7 +1180,7 @@ let pers_to_piqi_person conf base p =
     let related =
       if has_relations then
         let list =
-          let list = Mutil.list_uniq (List.sort compare (gen_p.related)) in
+          let list = List.sort_uniq compare gen_p.related in
           List.fold_left
             (fun list ic ->
                let c = pget conf base ic in
@@ -1284,7 +1284,7 @@ let pers_to_piqi_person conf base p =
     let was_witness =
       let list =
         let list = ref [] in
-        let related = Mutil.list_uniq (List.sort compare (gen_p.related)) in
+        let related = List.sort_uniq compare gen_p.related in
         let rec make_list =
           function
           | ic :: icl ->
