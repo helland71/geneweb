@@ -5,11 +5,6 @@ value int_size = 4;
 value verbose = ref True;
 value utf_8_db = Name.utf_8_db;
 
-value rindex s c =
-  pos (String.length s - 1) where rec pos i =
-    if i < 0 then None else if s.[i] = c then Some i else pos (i - 1)
-;
-
 value list_iter_first f al =
   let _ =
     List.fold_left (fun first a -> let () = f first a in False) True al
@@ -96,7 +91,7 @@ value decline case s =
 (* end compatibility code *)
 
 value nominative s =
-  match rindex s ':' with
+  match String.rindex_opt s ':' with
   [ Some _ -> decline 'n' s
   | _ -> s ]
 ;
@@ -197,7 +192,7 @@ value surnames_pieces surname =
 ;
 
 value tr c1 c2 s =
-  match rindex s c1 with
+  match String.rindex_opt s c1 with
   [ Some _ ->
       String.init (String.length s) convert_char
         where convert_char i =

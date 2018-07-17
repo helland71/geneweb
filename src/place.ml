@@ -32,7 +32,7 @@ value fold_place inverted s =
   in
   let (iend, rest) =
     if String.length s > 0 && s.[String.length s - 1] = ')' then
-      match Mutil.rindex s '(' with
+      match String.rindex_opt s '(' with
       [ Some i when i < String.length s - 2 ->
           let j =
             loop (i - 1) where rec loop i =

@@ -187,7 +187,7 @@ value transl_nth conf w n =
 ;
 
 value plus_decl s =
-  match Mutil.rindex s '+' with
+  match String.rindex_opt s '+' with
   [ Some i ->
       if i > 0 && s.[i - 1] = ' ' then
         let start = String.sub s 0 (i - 1) in
@@ -200,8 +200,8 @@ value plus_decl s =
 value gen_decline wt s =
   let s1 = if s = "" then "" else if wt = "" then s else " " ^ s in
   let len = String.length wt in
-  if Mutil.rindex wt '/' <> None then
-    match Mutil.rindex wt '/' with
+  if String.rindex_opt wt '/' <> None then
+    match String.rindex_opt wt '/' with
     [ Some i ->
         (* special case for Spanish *)
         if String.length s > 0 && start_with_hi_i s then
@@ -1544,7 +1544,7 @@ value url_no_index conf base =
   let addr =
     let pref =
       let s = get_request_string conf.request in
-      match Mutil.rindex s '?' with
+      match String.rindex_opt s '?' with
       [ Some i -> String.sub s 0 i
       | None -> s ]
     in

@@ -5,7 +5,6 @@ value int_size : int;
 value verbose : ref bool;
 value utf_8_db : ref bool;
 
-value rindex : string -> char -> option int;
 value list_iter_first : (bool -> 'a -> unit) -> list 'a -> unit;
 value list_uniq : list 'a -> list 'a;
 value tr : char -> char -> string -> string;
