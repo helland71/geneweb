@@ -44,7 +44,7 @@ value check_base bname = do {
   Check.check_base base (set_list errors) (set_list warnings)
     (fun _ -> True) changed_p False;
   List.iter (print_error base) (List.rev errors.val);
-  List.iter (print_warning base) (CheckItem.list_uniq warnings.val);
+  List.iter (print_warning base) (Mutil.list_uniq warnings.val);
   flush stdout;
 };
 

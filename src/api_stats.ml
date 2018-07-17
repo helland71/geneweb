@@ -15,19 +15,6 @@ open Api_util
 
 (**/**) (* API_STATS *)
 
-let list_uniq l =
-  let ht = Hashtbl.create (List.length l) in
-  let l =
-    List.fold_left
-      (fun accu x ->
-        let hash = Hashtbl.hash x in
-        if Hashtbl.mem ht hash then accu
-        else begin Hashtbl.add ht hash (); x :: accu end)
-      [] l
-  in
-  List.rev l
-;;
-
 let nsplit s c =
   if s = "" then []
   else
@@ -311,7 +298,7 @@ let format_stats_dmy l title series =
       (fun (k, (md, nb_m, nb_f)) -> Hashtbl.add ht k (md, nb_m, nb_f))
       l
   in
-  let labels = list_uniq (List.map (fun (k, _) -> k) l) in
+  let labels = Mutil.list_uniq (List.map (fun (k, _) -> k) l) in
   let data = Array.make (List.length series) ([| |]) in
   let data =
     Array.map
@@ -370,7 +357,7 @@ let format_stats_day l title =
       (fun (k, (md, nb_m, nb_f)) -> Hashtbl.add ht k (md, nb_m, nb_f))
       l
   in
-  let labels = list_uniq (List.map (fun (k, _) -> k) l) in
+  let labels = Mutil.list_uniq (List.map (fun (k, _) -> k) l) in
   let (data_mon, data_tue, data_wed, data_thu, data_fri, data_sat, data_sun) =
     List.fold_right
       (fun year data ->
@@ -456,7 +443,7 @@ let format_stats_month l title =
       (fun (k, (md, nb_m, nb_f)) -> Hashtbl.add ht k (md, nb_m, nb_f))
       l
   in
-  let labels = list_uniq (List.map (fun (k, _) -> k) l) in
+  let labels = Mutil.list_uniq (List.map (fun (k, _) -> k) l) in
   let (data_jan, data_feb, data_mar, data_apr,
        data_may, data_jun, data_jul, data_aug,
        data_sep, data_oct, data_nov, data_dec) =
@@ -604,7 +591,7 @@ let format_stats_astro l title =
       (fun (k, (md, nb_m, nb_f)) -> Hashtbl.add ht k (md, nb_m, nb_f))
       l
   in
-  let labels = list_uniq (List.map (fun (k, _) -> k) l) in
+  let labels = Mutil.list_uniq (List.map (fun (k, _) -> k) l) in
   let (data_aries, data_taurus, data_gemini, data_cancer,
        data_leo, data_virgo, data_libra, data_scorpio,
        data_sagittarius, data_capricorn, data_aquarius, data_pisces) =
@@ -811,7 +798,7 @@ let format_stats_moon l title =
       (fun (k, (md, nb_m, nb_f)) -> Hashtbl.add ht k (md, nb_m, nb_f))
       l
   in
-  let labels = list_uniq (List.map (fun (k, _) -> k) l) in
+  let labels = Mutil.list_uniq (List.map (fun (k, _) -> k) l) in
   let (data_new, data_first, data_full, data_last) =
     List.fold_right
       (fun year data ->

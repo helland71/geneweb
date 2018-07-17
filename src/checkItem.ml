@@ -9,20 +9,6 @@ type base_warning = warning person family title pers_event fam_event;
 type base_misc = misc person family title;
 
 
-value list_uniq wl =
-  (* On rend la liste unique, parce qu'il se peut qu'un warning soit *)
-  (* levé par plusieurs fonctions différents selon le context.       *)
-  let ht = Hashtbl.create 20 in
-  List.fold_left
-    (fun accu w ->
-       if Hashtbl.mem ht (Hashtbl.hash w) then accu
-       else do {
-         Hashtbl.add ht (Hashtbl.hash w) True;
-         [w :: accu]})
-    [] wl
-;
-
-
 (* Constants used for computing the warnings. *)
 value max_age_btw_cpl = 50;
 value max_days_btw_sibl = 10;

@@ -1300,7 +1300,7 @@ value all_checks_person conf base p a u = do {
   Array.iter
     (fun ifam -> CheckItem.reduce_family base error warning ifam (foi base ifam))
     u.family;
-  let wl = CheckItem.list_uniq wl.val in
+  let wl = Mutil.list_uniq wl.val in
   List.iter
     (fun
      [ ChangedOrderOfChildren ifam des _ after ->

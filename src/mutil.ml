@@ -24,14 +24,19 @@ value list_iter_first f al =
   ()
 ;
 
-value list_uniq =
-  fun
-  [ [_] | [] as l -> l
-  | [x :: l] ->
-      loop [] x l where rec loop rl x =
-        fun
-        [ [y :: l] -> if y = x then loop rl x l else loop [x :: rl] y l
-        | [] -> List.rev [x :: rl] ] ]
+value list_uniq l =
+  let ht = Hashtbl.create (List.length l) in
+  let l =
+    List.fold_left
+      (fun accu e ->
+        let hash = Hashtbl.hash e in
+        if Hashtbl.mem ht hash then accu
+        else do {
+          Hashtbl.add ht hash True;
+          [e :: accu] })
+      [] l
+  in
+  List.rev l
 ;
 
 (* [decline] has been deprecated since version 5.00

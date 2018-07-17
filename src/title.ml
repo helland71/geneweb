@@ -145,23 +145,7 @@ value compare_title_order conf base (x1, t1) (x2, t2) =
 ;
 
 value my_alphabetic n1 n2 =
-(*
-  compare (Name.abbrev (Name.lower n1)) (Name.abbrev (Name.lower n2))
-*)
   compare (Name.lower n1) (Name.lower n2)
-(**)
-;
-
-value string_list_uniq l =
-  let l =
-    List.fold_left
-      (fun l e ->
-         match l with
-         [ [] -> [e]
-         | [x :: _] -> if my_alphabetic e x = 0 then l else [e :: l] ])
-      [] l
-  in
-  List.rev l
 ;
 
 value string_cnt_list_uniq l =
@@ -178,8 +162,7 @@ value string_cnt_list_uniq l =
   List.rev l
 ;
 
-value compare_places p1 p2 = compare (Name.lower p1) (Name.lower p2);
-
+value compare_places p1 p2 = my_alphabetic p1 p2;
 value compare_titles t1 t2 = my_alphabetic t1 t2;
 value compare_titles2 (t1, _) (t2, _) = my_alphabetic t1 t2;
 
