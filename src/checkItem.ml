@@ -22,8 +22,6 @@ value list_uniq wl =
     [] wl
 ;
 
-value stable_list_uniq wl = List.rev (list_uniq wl);
-
 
 (* Constants used for computing the warnings. *)
 value max_age_btw_cpl = 50;
