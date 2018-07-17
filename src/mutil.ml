@@ -5,11 +5,13 @@ value int_size = 4;
 value verbose = ref True;
 value utf_8_db = Name.utf_8_db;
 
-value list_iter_first f al =
-  let _ =
-    List.fold_left (fun first a -> let () = f first a in False) True al
+value list_iter_first f l =
+  let rec loop first l =
+    match l with
+    [ [] -> ()
+    | [x :: l] -> do { f first x; loop False l } ]
   in
-  ()
+  loop True l
 ;
 
 value list_uniq l =
