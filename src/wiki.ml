@@ -491,10 +491,12 @@ value rec hotl conf wlo cnt edit_opt sections_nums list =
       let (list, sl) =
         match parag with
         [ Some ([], _, _) | None -> (list, sl)
-        | Some (parag, sl, False) when List.length parag >= 2 ->
-            (["</pre>" :: parag @ ["<pre>" :: list]], ["" :: sl])
         | Some (parag, sl, _) ->
-            (["</p>" :: parag @ ["<p>" :: list]], ["" :: sl]) ]
+            match parag with
+            [ [x; y :: pl] ->
+                (["</pre>" :: parag @ ["<pre>" :: list]], ["" :: sl])
+            | _ ->
+                (["</p>" :: parag @ ["<p>" :: list]], ["" :: sl]) ] ]
       in
       hotl conf wlo cnt edit_opt sections_nums list sl
   | [s :: sl] ->

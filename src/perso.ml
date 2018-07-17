@@ -2015,11 +2015,10 @@ and eval_simple_str_var conf base env (_, p_auth) =
             let s = string_with_macros conf [] s in
             let lines = Wiki.html_of_tlsw conf s in
             let lines =
-              if List.length lines > 2 then 
-                match lines with
-                [ ["<p>" :: remain] -> List.rev (List.tl (List.rev remain))
-                | _ -> lines ]
-              else lines
+              match lines with
+              [ ["<p>"; x; y :: remain] ->
+                  List.rev (List.tl (List.rev [x; y :: remain]))
+              | _ -> lines ]
             in
             let wi =
               {Wiki.wi_mode = "NOTES";
@@ -3730,7 +3729,10 @@ and eval_bool_person_field conf base env (p, p_auth) =
               | _ -> conf ]
             in
             match Perso_link.get_parents_link conf.command (get_key_index p) with
-            [ Some family -> List.length family.MLink.Family.children > 1
+            [ Some family ->
+                match family.MLink.Family.children with
+                [ [x; y :: l] -> True
+                | _ -> False ]
             | None -> False ]
           ELSE False END ]
   | "has_sources" ->

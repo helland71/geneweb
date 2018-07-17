@@ -418,10 +418,11 @@ value treat_new_row d t =
         let simple_parents_colspan =
           List.fold_left (fun x (_, c) -> x + c) 0 parents
         in
-        if simple_parents_colspan mod List.length children = 0 then
+        let children_len = List.length children in
+        if simple_parents_colspan mod children_len = 0 then
           let j = j + simple_parents_colspan in
           let children =
-            let cnt = simple_parents_colspan / List.length children in
+            let cnt = simple_parents_colspan / children_len in
             List.fold_right
               (fun d list ->
                  let rec loop cnt list =
