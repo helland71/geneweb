@@ -228,7 +228,7 @@ value rec print_descend_upto conf base max_cnt ini_p ini_br lev children =
                 let sp = get_spouse base ip ifam in
                 do {
                   if (Array.length (get_family p)) > 1 && lev >= 2 &&
-                  ((List.length children) > 0) && (has_desc_lev conf base lev sp)
+                  (children <> []) && (has_desc_lev conf base lev sp)
                   then
                     Wserver.printf "%s %s%s\n" (Util.transl conf "with") 
                       (person_title_text conf base sp) (Util.transl conf ":")

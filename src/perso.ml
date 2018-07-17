@@ -3613,8 +3613,8 @@ and eval_bool_person_field conf base env (p, p_auth) =
         let nb_fam = Array.length (get_family p) in
         match p_getenv conf.base_env "has_events" with
         [ Some "never" -> False
-        | Some "always" -> 
-          if nb_fam > 0 || (List.length events) > 0 then True else False
+        | Some "always" ->
+          if nb_fam > 0 || events <> [] then True else False
         | _ ->
             (* Renvoie vrai que si il y a des informations supplémentaires *)
             (* par rapport aux évènements principaux, i.e. témoins (mais   *)
@@ -3667,8 +3667,7 @@ and eval_bool_person_field conf base env (p, p_auth) =
   | "has_families" ->
        IFDEF API THEN
          Array.length (get_family p) > 0 ||
-           List.length
-             (Perso_link.get_family_correspondance conf.command (get_key_index p)) > 0
+           Perso_link.get_family_correspondance conf.command (get_key_index p) <> []
        ELSE
          Array.length (get_family p) > 0
        END

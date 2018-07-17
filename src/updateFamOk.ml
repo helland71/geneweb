@@ -1644,7 +1644,7 @@ value print_mod_ok conf base (wl, ml) cpl des =
     Hutil.header conf title;
     Hutil.print_link_to_welcome conf True;
     (* Si on a supprimé des caractères interdits *)
-    if List.length removed_string.val > 0 then
+    if removed_string.val <> [] then
       do {
          Wserver.printf "<h3 class=\"error\">" ;
          Wserver.printf
@@ -1680,9 +1680,11 @@ value print_add_ok conf base (wl, ml) cpl des =
     Hutil.header conf title;
     Hutil.print_link_to_welcome conf True;
     (* Si on a supprimé des caractères interdits *)
-    if List.length removed_string.val > 0 then
+    if removed_string.val <> [] then
       do {
-         Wserver.printf "<h2 class=\"error\">%s</h2>\n" (capitale (transl conf "forbidden char"));
+         Wserver.printf
+           "<h2 class=\"error\">%s</h2>\n"
+           (capitale (transl conf "forbidden char"));
          List.iter (Wserver.printf "<p>%s</p>") removed_string.val
       }
     else ();
