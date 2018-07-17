@@ -107,7 +107,7 @@ value cut_words str =
 
 value try_find_with_one_first_name conf base n =
   let n1 = Name.abbrev (Name.lower n) in
-  match Mutil.lindex n1 ' ' with
+  match String.index_opt n1 ' ' with
   [ Some i ->
       let fn = String.sub n1 0 i in
       let sn = String.sub n1 (i + 1) (String.length n1 - i - 1) in

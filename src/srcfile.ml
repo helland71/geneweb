@@ -313,7 +313,7 @@ value rec lexicon_translate conf base nomin strm first_c =
         (lexicon_translate conf base False strm (Stream.next strm))
     else
       let r = Util.transl_nth conf s n in
-      match Mutil.lindex r '%' with
+      match String.index_opt r '%' with
       [ Some i when c = "(" ->
           let sa =
             loop 0 where rec loop len =

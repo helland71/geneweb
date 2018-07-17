@@ -5,13 +5,6 @@ value int_size = 4;
 value verbose = ref True;
 value utf_8_db = Name.utf_8_db;
 
-value lindex s c =
-  pos 0 where rec pos i =
-    if i = String.length s then None
-    else if s.[i] = c then Some i
-    else pos (i + 1)
-;
-
 value rindex s c =
   pos (String.length s - 1) where rec pos i =
     if i < 0 then None else if s.[i] = c then Some i else pos (i - 1)
@@ -349,15 +342,15 @@ value input_lexicon lang ht open_fname =
   try
     let ic = open_fname () in
     let lang =
-      match lindex lang '.' with
+      match String.index_opt lang '.' with
       [ Some i -> String.sub lang 0 i
       | None -> lang ]
     in
     let derived_lang =
-      match lindex lang '-' with
+      match String.index_opt lang '-' with
       [ Some i -> String.sub lang 0 i
       | None ->
-          match lindex lang '_' with
+          match String.index_opt lang '_' with
           [ Some i -> String.sub lang 0 i
           | None -> "" ] ]
     in
@@ -374,7 +367,7 @@ value input_lexicon lang ht open_fname =
             in
             let k = String.sub k 4 (String.length k - 4) in
             let rec loop line =
-              match lindex line ':' with
+              match String.index_opt line ':' with
               [ Some i ->
                   let line_lang = String.sub line 0 i in
                   do {

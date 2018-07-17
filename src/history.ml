@@ -359,7 +359,7 @@ value line_fields line =
   if String.length line > String.length line_tpl then
     let time = String.sub line 0 19 in
     let (user, i) =
-      match (line.[20], Mutil.lindex line ']') with
+      match (line.[20], String.index_opt line ']') with
       [ ('[', Some i) ->
           let user = String.sub line 21 (i - 21) in (user, i + 2)
       | _ -> ("", 20) ]

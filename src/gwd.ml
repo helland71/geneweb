@@ -242,7 +242,7 @@ value alias_lang lang =
         let lang =
           try
             let rec loop line =
-              match Mutil.lindex line '=' with
+              match String.index_opt line '=' with
               [ Some i ->
                   if lang = String.sub line 0 i then
                     String.sub line (i + 1) (String.length line - i - 1)
@@ -534,10 +534,10 @@ value digest_match_auth_file asch =
 ;
 
 value match_simple_passwd sauth uauth =
-  match Mutil.lindex sauth ':' with
+  match String.index_opt sauth ':' with
   [ Some _ -> sauth = uauth
   | None ->
-      match Mutil.lindex uauth ':' with
+      match String.index_opt uauth ':' with
       [ Some i ->
           sauth = String.sub uauth (i + 1) (String.length uauth - i - 1)
       | None -> sauth = uauth ] ]
@@ -915,7 +915,7 @@ value basic_authorization from_addr request base_env passwd access_type
               | None -> (True, False, False, "") ] ]
   in
   let user =
-    match Mutil.lindex uauth ':' with
+    match String.index_opt uauth ':' with
     [ Some i ->
         let s = String.sub uauth 0 i in
         if s = wizard_passwd || s = friend_passwd then "" else s
@@ -949,7 +949,7 @@ value basic_authorization from_addr request base_env passwd access_type
         if wizard then "Wizard " ^ base_file else "Friend " ^ base_file
       in
         let (u, p) =
-          match Mutil.lindex passwd1 ':' with
+          match String.index_opt passwd1 ':' with
           [ Some i ->
               let u = String.sub passwd1 0 i in
               let p =
