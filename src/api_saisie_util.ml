@@ -1943,20 +1943,21 @@ let person_map conf base l base_loop compute_sosa load_img =
 ;;
 
 let data_list_person conf base filters l =
+  let len = List.length l in
   let compute_sosa =
-    if List.length l > 20 then
+    if len > 20 then
       let () = Perso.build_sosa_ht conf base in
       Perso.get_sosa_person
     else Perso.get_single_sosa
   in
   let load_img =
-    if List.length l > 20 then
+    if len > 20 then
       let () = load_image_ht conf base in true
     else false
   in
   let l = List.filter (apply_filters_p conf base filters compute_sosa) l in
   if filters.nb_results then
-    let len = M.Internal_int32.({value = Int32.of_int (List.length l)}) in
+    let len = M.Internal_int32.({value = Int32.of_int len}) in
     Mext.gen_internal_int32 len
   else
     let base_loop = has_base_loop conf base in
@@ -1971,19 +1972,20 @@ let data_list_person conf base filters l =
 ;;
 
 let data_list_person_option conf base filters l =
+  let len = List.length l in
   let compute_sosa =
-    if List.length l > 20 then
+    if len > 20 then
       let () = Perso.build_sosa_ht conf base in
       Perso.get_sosa_person
     else Perso.get_single_sosa
   in
   let load_img =
-    if List.length l > 20 then
+    if len > 20 then
       let () = load_image_ht conf base in true
     else false
   in
   if filters.nb_results then
-    let len = M.Internal_int32.({value = Int32.of_int (List.length l)}) in
+    let len = M.Internal_int32.({value = Int32.of_int len}) in
     Mext.gen_internal_int32 len
   else
     let base_loop = has_base_loop conf base in
@@ -2044,14 +2046,15 @@ let data_list_person_option conf base filters l =
 
 
 let person_node_map conf base l =
+  let len = List.length l in
   let compute_sosa =
-    if List.length l > 20 then
+    if len > 20 then
       let () = Perso.build_sosa_ht conf base in
       Perso.get_sosa_person
     else Perso.get_single_sosa
   in
   let load_img =
-    if List.length l > 20 then
+    if len > 20 then
       let () = load_image_ht conf base in true
     else false
   in

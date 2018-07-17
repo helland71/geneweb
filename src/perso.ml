@@ -3544,9 +3544,8 @@ and eval_bool_person_field conf base env (p, p_auth) =
                          Adef.iper_of_int (Int32.to_int fam_link.MLink.Family.ifath),
                          Adef.iper_of_int (Int32.to_int fam_link.MLink.Family.imoth))
                       in
-                      List.length
-                        (Perso_link.get_children_of_parents
-                           fam_link.MLink.Family.baseprefix ifam ifath imoth) > 0
+                      Perso_link.get_children_of_parents
+                        fam_link.MLink.Family.baseprefix ifam ifath imoth <> []
                     else loop faml ]
             ELSE False END
       | _ ->
@@ -3566,8 +3565,7 @@ and eval_bool_person_field conf base env (p, p_auth) =
                     [ Vstring baseprefix -> {(conf) with command = baseprefix}
                     | _ -> conf ]
                   in
-                  List.length
-                    (Perso_link.get_children_of_parents conf.command ifam ifath imoth) > 0
+                  Perso_link.get_children_of_parents conf.command ifam ifath imoth <> []
               | _ -> False ]
             ELSE False END ]
   | "has_consanguinity" ->
