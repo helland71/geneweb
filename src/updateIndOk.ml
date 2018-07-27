@@ -1481,7 +1481,7 @@ value print_mod o_conf base =
     let fname = Filename.concat bdir "notes_links" in
     let db = NotesLinks.read_db_from_file fname in
     let db = Notes.merge_possible_aliases conf db in
-    let pgl = Perso.links_to_ind conf base db key in
+    let pgl = Notes.links_to_ind conf base db key in
     pgl
   in
   let callback sp = do {
@@ -1504,6 +1504,7 @@ value print_mod o_conf base =
       String.concat " " (List.map (sou base) sl)
     in
     Notes.update_notes_links_db conf (NotesLinks.PgInd p.key_index) s;
+    Notes.patch_cache_person_linked_pages conf p.key_index (pgl <> []);
     if not (eq_istr (get_surname op) p.surname) ||
        not (Futil.eq_lists eq_istr (get_surnames_aliases op) p.surnames_aliases) ||
        not (Futil.eq_lists (Futil.eq_titles eq_istr) (get_titles op) p.titles)

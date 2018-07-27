@@ -217,3 +217,29 @@ value main () =
 ;
 
 Printexc.print main ();
+
+(*
+value init_cache_person_linked_pages conf base = do {
+  let db =
+    let bdir = Util.base_path [] (conf.bname ^ ".gwb") in
+    let fname = Filename.concat bdir "notes_links" in
+    let db = NotesLinks.read_db_from_file fname in
+    let db = merge_possible_aliases conf db in
+    db
+  in
+  let nb_ind = Gwdb.nb_of_persons base in
+  for i = 0 to nb_ind - 1 do {
+    let ip = Adef.iper_of_int i in
+    let p = poi base ip in
+    let key =
+      let fn = Name.lower (sou base (get_first_name p)) in
+      let sn = Name.lower (sou base (get_surname p)) in
+      (fn, sn, get_occ p)
+    in
+    if links_to_ind conf base db key <> [] then
+      Hashtbl.add ht_cache_person_linked_pages ip True
+    else ()
+  };
+  write_cache_person_linked_pages conf;
+};
+*)
