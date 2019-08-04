@@ -150,12 +150,8 @@ let string_of_start_date conf =
         Dgreg
           ({day = d; month = m; year = y; prec = Sure; delta = 0}, Dgregorian)
       in
-      Util.translate_eval (Date.string_of_date conf d)
+      Util.translate_eval (DateDisplay.string_of_date conf d)
   | _ -> r.start_date
-
-let string_of_num sep num =
-  let len = ref 0 in
-  Sosa.print (fun x -> len := Buff.mstore !len x) sep num; Buff.get !len
 
 let macro conf base =
   function
@@ -172,8 +168,7 @@ let macro conf base =
       s ^ body_prop conf
   | 'c' ->
       let r = count conf in
-      string_of_num (transl conf "(thousand separator)")
-        (Sosa.of_int r.welcome_cnt)
+      Mutil.string_of_int_sep (Util.transl conf "(thousand separator)") r.welcome_cnt
   | 'd' -> string_of_start_date conf
   | 'D' -> (count conf).start_date
   | 'e' -> conf.charset
@@ -190,21 +185,16 @@ let macro conf base =
       with Not_found -> "20"
       end
   | 'n' ->
-      string_of_num (transl conf "(thousand separator)")
-        (Sosa.of_int (nb_of_persons base))
-  | 'N' ->
-      let s = base_notes_read_first_line base "" in
-      let len = String.length s in
-      if len > 9 && String.sub s 0 5 = "<!-- " &&
-         String.sub s (len - 4) 4 = " -->"
-      then
-        " : " ^ String.sub s 5 (String.length s - 9)
-      else ""
+      Mutil.string_of_int_sep
+        (Util.transl conf "(thousand separator)")
+        (nb_of_persons base)
+  | 'N' -> (try List.assoc "base_notes_title" conf.base_env with Not_found -> "")
   | 'o' -> image_prefix conf
   | 'q' ->
       let r = count conf in
-      string_of_num (transl conf "(thousand separator)")
-        (Sosa.of_int (r.welcome_cnt + r.request_cnt))
+      Mutil.string_of_int_sep
+        (Util.transl conf "(thousand separator)")
+        (r.welcome_cnt + r.request_cnt)
   | 'R' -> conf.right
   | 's' -> commd conf
   | 't' -> conf.bname
@@ -415,10 +405,8 @@ and copy_from_file conf base name mode =
     | Source -> source_file_name conf name
   in
   match try Some (Secure.open_in fname) with Sys_error _ -> None with
-    Some ic -> copy_from_channel conf base ic mode
-  | None ->
-      Wserver.printf "<em>... file not found: \"%s.txt\"</em>" name;
-      html_br conf
+  | Some ic -> copy_from_channel conf base ic mode
+  | None -> Wserver.printf "<em>... file not found: \"%s.txt\"</em><br>" name
 and copy_from_channel conf base ic mode =
   copy_from_stream conf base (Stream.of_channel ic) mode; close_in ic
 and copy_from_string conf base str mode =
@@ -447,10 +435,7 @@ let gen_print with_logo mode conf base fname =
   | _ ->
       let title _ = Wserver.printf "Error" in
       Hutil.header conf title;
-      Wserver.printf "<ul>\n";
-      html_li conf;
-      Wserver.printf "Cannot access file \"%s.txt\".\n" fname;
-      Wserver.printf "</ul>\n";
+      Wserver.printf "<ul><li>Cannot access file \"%s.txt\"</ul>" fname;
       Hutil.gen_trailer with_logo conf;
       raise Exit
 
@@ -476,23 +461,14 @@ let eval_var conf base env () _loc =
   | ["base"; "name"] -> VVstring conf.bname
   | ["base"; "nb_persons"] ->
       VVstring
-        (string_of_num (Util.transl conf "(thousand separator)")
-           (Sosa.of_int (nb_of_persons base)))
+        (Mutil.string_of_int_sep
+           (Util.transl conf "(thousand separator)")
+           (nb_of_persons base))
   | ["base"; "real_nb_persons"] ->
       VVstring
-        (string_of_num (Util.transl conf "(thousand separator)")
-           (Sosa.of_int (Util.real_nb_of_persons conf base)))
-  | ["base"; "title"] ->
-      let s = base_notes_read_first_line base "" in
-      let len = String.length s in
-      let s =
-        if len > 9 && String.sub s 0 5 = "<!-- " &&
-           String.sub s (len - 4) 4 = " -->"
-        then
-          " : " ^ String.sub s 5 (String.length s - 9)
-        else ""
-      in
-      VVstring s
+        (Mutil.string_of_int_sep
+           (Util.transl conf "(thousand separator)")
+           (Util.real_nb_of_persons conf base))
   | ["browsing_with_sosa_ref"] ->
       begin match get_env "sosa_ref" env with
         Vsosa_ref v -> VVbool (Lazy.force v <> None)
@@ -503,15 +479,17 @@ let eval_var conf base env () _loc =
   | ["nb_accesses"] ->
       let r = count conf in
       let s =
-        string_of_num (transl conf "(thousand separator)")
-          (Sosa.of_int (r.welcome_cnt + r.request_cnt))
+        (Mutil.string_of_int_sep
+           (Util.transl conf "(thousand separator)")
+           (r.welcome_cnt + r.request_cnt))
       in
       VVstring s
   | ["nb_accesses_to_welcome"] ->
       let r = count conf in
       let s =
-        string_of_num (transl conf "(thousand separator)")
-          (Sosa.of_int r.welcome_cnt)
+        (Mutil.string_of_int_sep
+           (Util.transl conf "(thousand separator)")
+           r.welcome_cnt)
       in
       VVstring s
   | ["random"; "init"] -> Random.self_init (); VVstring ""
@@ -563,28 +541,3 @@ let print conf base fname =
        Templ.print_foreach = print_foreach conf}
       [] ()
   else gen_print true Lang conf base fname
-
-(* lexicon (info) *)
-
-let print_lexicon conf _base =
-  let title _ = Wserver.printf "Lexicon" in
-  let fname = search_in_lang_path (Filename.concat "lang" "lex_utf8.txt") in
-  Hutil.header conf title;
-  begin match (try Some (Secure.open_in fname) with Sys_error _ -> None) with
-    Some ic ->
-      Wserver.printf "<pre dir=\"ltr\">\n";
-      begin try
-        while true do
-          match input_char ic with
-            '<' -> Wserver.printf "&lt;"
-          | c -> Wserver.printf "%c" c
-        done
-      with End_of_file -> ()
-      end;
-      Wserver.printf "</pre>\n";
-      close_in ic
-  | None ->
-      Wserver.printf "<em>... file not found: \"%s.txt\"</em>" "lexicon";
-      html_br conf
-  end;
-  Hutil.trailer conf

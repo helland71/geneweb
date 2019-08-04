@@ -26,11 +26,7 @@ val get_referer : config -> string
 val no_html_tags : string -> string
 val clean_html_tags : string -> string list -> string
 
-val nl : unit -> unit
 val html : ?content_type:string -> config -> unit
-val html_br : config -> unit
-val html_p : config -> unit
-val html_li : config -> unit
 val unauthorized : config -> string -> unit
 val string_of_ctime : config -> string
 
@@ -48,11 +44,11 @@ val nobtit : config -> base -> person -> title list
 
 val strictly_after_private_years : config -> dmy -> bool
 val authorized_age : config -> base -> person -> bool
-val is_old_person : config -> (iper, istr) gen_person -> bool
+val is_old_person : config -> (iper, iper, istr) gen_person -> bool
 val fast_auth_age : config -> person -> bool
 
 val start_with_vowel : string -> bool
-val know : base -> person -> bool
+
 val acces_n : config -> base -> string -> person -> string
 val acces : config -> base -> person -> string
 val wprint_hidden_person : config -> base -> string -> person -> unit
@@ -66,9 +62,9 @@ val is_hidden : person -> bool
 
 val pget : config -> base -> iper -> person
 val string_gen_person :
-  base -> (iper, istr) gen_person -> (iper, string) gen_person
+  base -> (iper, iper, istr) gen_person -> (iper, iper, string) gen_person
 val string_gen_family :
-  base -> (iper, istr) gen_family -> (iper, string) gen_family
+  base -> (iper, ifam, istr) gen_family -> (iper, ifam, string) gen_family
 
 type p_access = (base -> person -> string) * (base -> person -> string)
 val std_access : p_access
@@ -116,6 +112,7 @@ val index_of_next_char : string -> int -> int
 val open_etc_file : string -> in_channel option
 val open_hed_trl : config -> string -> in_channel option
 val open_templ : config -> string -> in_channel option
+val open_templ_fname : config -> string -> (in_channel * string) option
 val string_with_macros :
   config -> (char * (unit -> string)) list -> string -> string
 val string_of_place : config -> string -> string
@@ -179,8 +176,16 @@ val index_of_sex : sex -> int
 
 val string_of_pevent_name :
   config -> base -> istr gen_pers_event_name -> string
-val string_of_fevent_name :
-  config -> base -> istr gen_fam_event_name -> string
+
+(** [string_of_fevent_name conf base fevent_name]
+*)
+val string_of_fevent_name
+  : config -> base -> istr gen_fam_event_name -> string
+
+(** [string_of_fevent conf base fevent_name]
+*)
+val string_of_fevent
+  : config -> base -> istr gen_fam_event_name -> string
 
 (** [string_of_witness_kind conf sex wk]
     Return the string corresponding to wk according to [sex] and [conf].
@@ -204,11 +209,30 @@ val update_gwf_sosa : config -> base -> iper * (string * string * int) -> unit
 val get_server_string : string list -> string
 val get_request_string : string list -> string
 
-val create_topological_sort : config -> base -> int array
+val create_topological_sort : config -> base -> (iper, int) Gwdb.Marker.t
 
-val branch_of_sosa :
-  config -> base -> iper -> Sosa.t -> (iper * sex) list option
-val sosa_of_branch : (iper * sex) list -> Sosa.t
+(** [p_of_sosa conf base sosa p0]
+    Get the sosa [sosa] of [p0] if it exists
+*)
+val p_of_sosa : config -> base -> Sosa.t -> person -> person option
+
+(** [branch_of_sosa conf base sosa p0]
+    Get all the lineage to go from [p0]'s sosa [sosa] to [p0]
+*)
+val branch_of_sosa : config -> base -> Sosa.t -> person -> person list option
+
+(** [sosa_of_branch branch]
+    Given a path of person to follow [branch], return the sosa number
+    of the last person of this list. No check is done to ensure that
+    given persons are actually parents.
+*)
+val sosa_of_branch : person list -> Sosa.t
+
+(** @deprecated Use [branch_of_sosa] instead *)
+val old_branch_of_sosa : config -> base -> iper -> Sosa.t -> (iper * sex) list option
+
+(** @deprecated Use [sosa_of_branch] instead *)
+val old_sosa_of_branch : config -> base -> (iper * sex) list -> Sosa.t
 
 val has_image : config -> base -> person -> bool
 val image_file_name : string -> string
@@ -263,10 +287,6 @@ val is_that_user_and_password : auth_scheme_kind -> string -> string -> bool
 val in_text : bool -> string -> string -> bool
 val html_highlight : bool -> string -> string -> string
 
-(* Pretty print XHTML wrapper for Wserver.wrap_string *)
-
-val xml_pretty_print : string -> string
-
 (* Print list in columns with Gutil.alphabetic order *)
 
 val wprint_in_columns :
@@ -308,8 +328,8 @@ val real_nb_of_persons : config -> base -> int
 val array_mem_witn
  : Config.config
  -> Gwdb.base
- -> Def.iper
- -> (Def.iper * Def.witness_kind) array
+ -> iper
+ -> (iper * Def.witness_kind) array
  -> bool * string
 
 (** Print a date using "%4d-%02d-%02d %02d:%02d:%02d" format. *)
@@ -339,15 +359,6 @@ val rev_iter : ('a -> unit) -> 'a list -> unit
  *)
 val groupby : key:('a -> 'k) -> value:('a -> 'v) -> 'a list -> ('k * 'v list) list
 
-(** [str_replace ?unsafe c ~by str]
-    Return a new string which is the same as [str] with all occurences of [c]
-    replaced by [by].
-    If [str] does not contain [c]. [str] is returned intouched.
-
-    If [unsafe] is set to true, [str] is modified instead of a copy of [str].
- *)
-val str_replace : ?unsafe:bool -> char -> by:char -> string -> string
-
 (** [str_nth_pos str n]
     Return a position of the byte starting the [n]-th UTF8 character.
  *)
@@ -370,11 +381,6 @@ val ls_r : string list -> string list
 *)
 val rm_rf : string -> unit
 
-(** [rm fname]
-    Remove [fname]. If [fname] does not exists, do nothing.
-*)
-val rm : string -> unit
-
 (** [escape_html str] replaces '&', '"', '\'', '<' and '>'
     with their corresponding character entities (using entity number) *)
 val escape_html : string -> string
@@ -389,6 +395,11 @@ val escape_html : string -> string
    Text is escaped using [escape_html].
  *)
 val safe_html : string -> string
+
+(** [is_empty_name p]
+    [false] if we knwon the first name or the last name of [p].
+*)
+val is_empty_name : person -> bool
 
 (**/**)
 val init_cache_info : string -> Gwdb.base -> unit

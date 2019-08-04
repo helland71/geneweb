@@ -7,7 +7,7 @@ open Gwdb
 open Util
 
 let print_child_person conf base p =
-  let var = "c" ^ string_of_int (Adef.int_of_iper (get_key_index p)) in
+  let var = "c" ^ string_of_iper (get_iper p) in
   let first_name =
     match p_getenv conf.env (var ^ "_first_name") with
       Some v -> v
@@ -86,7 +86,7 @@ let print_children conf base ipl =
        Wserver.printf "<li class=\"mt-3\">\n";
        Wserver.printf "<span class=\"ml-2\">%s"
          (reference conf base p (person_text conf base p));
-       Wserver.printf "%s</span>\n" (Date.short_dates_text conf base p);
+       Wserver.printf "%s</span>\n" (DateDisplay.short_dates_text conf base p);
        print_child_person conf base p;
        Wserver.printf "</li>\n")
     ipl;
@@ -106,12 +106,12 @@ let print_change conf base p =
     let s = person_text conf base p in
     Wserver.printf "%s" (Util.transl_a_of_b conf "" (reference conf base p s) s)
   end ;
-  Wserver.printf " %s" (Date.short_dates_text conf base p);
+  Wserver.printf " %s" (DateDisplay.short_dates_text conf base p);
   Wserver.printf "</h2>\n";
   Wserver.printf "<form method=\"post\" action=\"%s\">\n" conf.command;
   Util.hidden_env conf;
-  Wserver.printf "<input type=\"hidden\" name=\"ip\" value=\"%d\">\n"
-    (Adef.int_of_iper (get_key_index p));
+  Wserver.printf "<input type=\"hidden\" name=\"ip\" value=\"%s\">\n"
+    (string_of_iper (get_iper p));
   Wserver.printf "<input type=\"hidden\" name=\"digest\" value=\"%s\">\n"
     digest;
   Wserver.printf "<input type=\"hidden\" name=\"m\" value=\"CHG_CHN_OK\">\n";
@@ -126,9 +126,9 @@ let print_change conf base p =
   Hutil.trailer conf
 
 let print conf base =
-  match p_getint conf.env "ip" with
+  match p_getenv conf.env "ip" with
     Some i ->
-      let p = poi base (Adef.iper_of_int i) in print_change conf base p
+      let p = poi base (iper_of_string i) in print_change conf base p
   | _ -> Hutil.incorrect_request conf
 
 let print_children_list conf base u =
@@ -143,10 +143,10 @@ let print_children_list conf base u =
        Array.iter
          (fun ip ->
             let p = poi base ip in
-            html_li conf;
+            Wserver.printf "<li>" ;
             Wserver.printf "\n%s"
               (reference conf base p (person_text conf base p));
-            Wserver.printf "%s\n" (Date.short_dates_text conf base p))
+            Wserver.printf "%s\n" (DateDisplay.short_dates_text conf base p))
          (get_children des))
     (get_family u);
   Wserver.printf "</ul>\n"
@@ -158,7 +158,7 @@ let print_change_done conf base p =
   in
   Hutil.header conf title;
   Wserver.printf "\n%s" (reference conf base p (person_text conf base p));
-  Wserver.printf "%s\n" (Date.short_dates_text conf base p);
+  Wserver.printf "%s\n" (DateDisplay.short_dates_text conf base p);
   print_children_list conf base p;
   Hutil.trailer conf
 
@@ -190,7 +190,7 @@ let print_conflict conf base ip_var p =
        Wserver.printf "<input type=\"hidden\" name=\"%s\" value=\"%s\">\n" x
          (Util.escape_html (decode_varenv v)))
     (conf.henv @ conf.env);
-  begin let var = "c" ^ string_of_int (Adef.int_of_iper ip_var) in
+  begin let var = "c" ^ string_of_iper ip_var in
     Wserver.printf "<input type=\"hidden\" name=\"field\" value=\"%s\">\n" var
   end;
   Wserver.printf "<input type=\"hidden\" name=\"free_occ\" value=\"%d\">\n"
@@ -208,14 +208,14 @@ let check_conflict conf base p key new_occ ipl =
   List.iter
     (fun ip ->
        let p1 = poi base ip in
-       if get_key_index p1 <> get_key_index p &&
+       if get_iper p1 <> get_iper p &&
           Name.lower (p_first_name base p1 ^ " " ^ p_surname base p1) =
             name &&
           get_occ p1 = new_occ
        then
          begin
-           print_conflict conf base (get_key_index p) p1;
-           raise Update.ModErr
+           print_conflict conf base (get_iper p) p1;
+           raise @@ Update.ModErr __LOC__
          end)
     ipl
 
@@ -224,7 +224,7 @@ let error_person conf err =
   Hutil.rheader conf title;
   Wserver.printf "%s\n" (capitale err);
   Hutil.trailer conf;
-  raise Update.ModErr
+  raise @@ Update.ModErr __LOC__
 
 let rename_image_file conf base p (nfn, nsn, noc) =
   match auto_image_file conf base p with
@@ -241,7 +241,7 @@ exception FirstNameMissing of iper
 
 let change_child conf base parent_surname changed ip =
   let p = poi base ip in
-  let var = "c" ^ string_of_int (Adef.int_of_iper (get_key_index p)) in
+  let var = "c" ^ string_of_iper (get_iper p) in
   let new_first_name =
     match p_getenv conf.env (var ^ "_first_name") with
       Some x -> only_printable x
@@ -281,10 +281,6 @@ let change_child conf base parent_surname changed ip =
       ; occ = new_occ}
     in
     patch_person base ip p;
-    patch_key base ip new_first_name new_surname new_occ;
-    Gutil.person_ht_add base key ip;
-    let np_misc_names = gen_person_misc_names base p (fun p -> p.titles) in
-    List.iter (fun key -> Gutil.person_ht_add base key p.key_index) np_misc_names ;
     changed
   end
   else changed
@@ -298,34 +294,32 @@ let print_update_child conf base =
   | _ -> Hutil.incorrect_request conf
 
 let print_change_ok conf base p =
-  try
-    let ipl = select_children_of base p in
-    let parent_surname = p_surname base p in
-    let redisp =
-      match p_getenv conf.env "return" with
-        Some _ -> true
-      | _ -> false
+  let ipl = select_children_of base p in
+  let parent_surname = p_surname base p in
+  let redisp =
+    match p_getenv conf.env "return" with
+      Some _ -> true
+    | _ -> false
+  in
+  if redisp then print_update_child conf base
+  else begin
+    check_digest conf (digest_children base ipl);
+    let changed =
+      try change_children conf base parent_surname ipl
+      with FirstNameMissing _ -> error_person conf (transl conf "first name missing")
     in
-    if redisp then print_update_child conf base
-    else begin
-      check_digest conf (digest_children base ipl);
-      let changed =
-        try change_children conf base parent_surname ipl
-        with FirstNameMissing _ -> error_person conf (transl conf "first name missing")
-      in
-      Util.commit_patches conf base;
-      let changed =
-        U_Change_children_name
-          (Util.string_gen_person base (gen_person_of_person p), changed)
-      in
-      History.record conf base changed "cn";
-      print_change_done conf base p
-    end
-  with Update.ModErr -> ()
+    Util.commit_patches conf base;
+    let changed =
+      U_Change_children_name
+        (Util.string_gen_person base (gen_person_of_person p), changed)
+    in
+    History.record conf base changed "cn";
+    print_change_done conf base p
+  end
 
 let print_ok o_conf base =
   let conf = Update.update_conf o_conf in
-  match p_getint conf.env "ip" with
+  match p_getenv conf.env "ip" with
     Some i ->
-      let p = poi base (Adef.iper_of_int i) in print_change_ok conf base p
+      let p = poi base (iper_of_string i) in print_change_ok conf base p
   | _ -> Hutil.incorrect_request conf

@@ -5,14 +5,24 @@ with a Web interface and can be used off-line or as a Web service.
 
 ## Build status
 
-| [Linux/OSX][lin-link] | [Windows][win-link] |
-| :-------------------: | :-----------------: |
-| ![lin-badge]          | ![win-badge]        |
+|            | Linux                       | macOS                        | Windows (mingw64)
+| ---:       | :---:                       | :---:                        | :---:
+| OCaml 4.05 | [![linux-405]][travis-link] | [![macosx-405]][travis-link] | -
+| OCaml 4.06 | [![linux-406]][travis-link] | [![macosx-406]][travis-link] | -
+| OCaml 4.07 | [![linux-407]][travis-link] | [![macosx-407]][travis-link] | [![win-407]][appveyor-link]
+| OCaml 4.08 | [![linux-408]][travis-link] | [![macosx-408]][travis-link] | -
 
-[lin-link]:  https://travis-ci.org/geneweb/geneweb "Travis build status"
-[lin-badge]: https://travis-ci.org/geneweb/geneweb.svg?branch=master "Travis build status"
-[win-link]:  https://ci.appveyor.com/project/ipfix/geneweb "AppVeyor build status"
-[win-badge]: https://ci.appveyor.com/api/projects/status/k7e1c67m4hc22491/branch/master?svg=true "AppVeyor build status"
+[linux-405]:https://travis-matrix-badges.herokuapp.com/repos/geneweb/geneweb/branches/master/1
+[linux-406]:https://travis-matrix-badges.herokuapp.com/repos/geneweb/geneweb/branches/master/2
+[linux-407]:https://travis-matrix-badges.herokuapp.com/repos/geneweb/geneweb/branches/master/3
+[linux-408]:https://travis-matrix-badges.herokuapp.com/repos/geneweb/geneweb/branches/master/4
+[macosx-405]:https://travis-matrix-badges.herokuapp.com/repos/geneweb/geneweb/branches/master/5
+[macosx-406]:https://travis-matrix-badges.herokuapp.com/repos/geneweb/geneweb/branches/master/6
+[macosx-407]:https://travis-matrix-badges.herokuapp.com/repos/geneweb/geneweb/branches/master/7
+[macosx-408]:https://travis-matrix-badges.herokuapp.com/repos/geneweb/geneweb/branches/master/8
+[win-407]:https://ci.appveyor.com/api/projects/status/5a5yk7jvxk332pxu/branch/master?svg=true
+[travis-link]:https://travis-ci.org/geneweb/geneweb
+[appveyor-link]:https://ci.appveyor.com/project/geneweb/geneweb
 
 ## Documentation
 
@@ -23,7 +33,7 @@ The documentation is available online: http://geneweb.tuxfamily.org/
 Using [opam](https://opam.ocaml.org/):
 
 ```
-opam pin add -k git https://github.com:geneweb/geneweb --no-action
+opam pin add -k git https://github.com/geneweb/geneweb --no-action
 opam depext geneweb
 opam install geneweb
 ```
@@ -82,7 +92,6 @@ $ ./configure --api
 
 * Try to keep the same coding style as the existing one.
 * New code should not contain any trailing whitespace.
-* If a unit test can be written
 * Each pull request should have a single clear purpose. If it containes
   multiple unrelated changes, those changes should be split into
   separate pull requests.

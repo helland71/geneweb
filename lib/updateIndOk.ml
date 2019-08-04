@@ -1,4 +1,3 @@
-(* $Id: updateIndOk.ml,v 5.75 2008-01-21 13:28:12 ddr Exp $ *)
 (* Copyright (c) 1998-2007 INRIA *)
 
 open Config
@@ -443,8 +442,7 @@ let reconstitute_from_pevents pevents ext bi bp de bu =
   (* On tri les évènements pour être sûr. *)
   let pevents =
     CheckItem.sort_events
-      ((fun evt -> CheckItem.Psort evt.epers_name),
-       (fun evt -> evt.epers_date))
+      (fun evt -> CheckItem.Psort evt.epers_name) (fun evt -> evt.epers_date)
       pevents
   in
   let found_birth = ref false in
@@ -576,8 +574,8 @@ let reconstitute_person conf =
   let ext = false in
   let key_index =
     match p_getenv conf.env "i" with
-      Some s -> (try int_of_string (String.trim s) with Failure _ -> -1)
-    | _ -> -1
+    | Some s -> (try iper_of_string (String.trim s) with Failure _ -> dummy_iper)
+    | _ -> dummy_iper
   in
   let first_name = no_html_tags (only_printable (get conf "first_name")) in
   let surname = no_html_tags (only_printable (get conf "surname")) in
@@ -706,7 +704,7 @@ let reconstitute_person conf =
      death_note = death_note; death_src = death_src; burial = burial;
      burial_place = burial_place; burial_note = burial_note;
      burial_src = burial_src; pevents = pevents; notes = notes;
-     psources = psources; key_index = Adef.iper_of_int key_index}
+     psources = psources; key_index = key_index}
   in
   p, ext
 
@@ -748,17 +746,23 @@ let check_person conf p =
 
 let error_person conf err =
 #ifdef API
-  if !(Api_conf.mode_api) then
-    begin let err = Printf.sprintf "%s" (capitale (transl conf "error")) in
-      raise (Update.ModErrApi err)
-    end;
+  if !Api_conf.mode_api then begin
 #endif
   let title _ = Wserver.printf "%s" (capitale (transl conf "error")) in
   Hutil.rheader conf title;
   Wserver.printf "%s\n" (capitale err);
   Update.print_return conf;
   Hutil.trailer conf;
-  raise Update.ModErr
+#ifdef API
+  end ;
+#endif
+  let err =
+    Printf.sprintf "%s%s%s"
+      (capitale (transl conf "error"))
+      (capitale (transl conf ":"))
+      err
+  in
+  raise @@ Update.ModErr err
 
 let strip_pevents p =
   let strip_array_witness pl =
@@ -798,19 +802,7 @@ let strip_person p =
 
 let print_conflict conf base p =
 #ifdef API
-  if !(Api_conf.mode_api) then
-    begin let err =
-      Printf.sprintf
-        (fcapitale (ftransl conf "name %s already used by %tthis person%t"))
-        ("\"" ^ p_first_name base p ^ "." ^ string_of_int (get_occ p) ^ " " ^
-         p_surname base p ^ "\"")
-        (fun _ ->
-           Printf.sprintf "%s %s" (sou base (get_first_name p))
-             (sou base (get_surname p)))
-        (fun _ -> ".")
-    in
-      raise (Update.ModErrApi err)
-    end;
+  if not !Api_conf.mode_api then begin
 #endif
   let title _ = Wserver.printf "%s" (capitale (transl conf "error")) in
   Hutil.rheader conf title;
@@ -848,36 +840,45 @@ let print_conflict conf base p =
   Wserver.printf "</form>\n";
   Update.print_same_name conf base p;
   Hutil.trailer conf;
-  raise Update.ModErr
+#ifdef API
+  end ;
+#endif
+  let err =
+    Printf.sprintf
+      (fcapitale (ftransl conf "name %s already used by %tthis person%t"))
+      ("\"" ^ p_first_name base p ^ "." ^ string_of_int (get_occ p) ^ " " ^
+       p_surname base p ^ "\"")
+      (fun _ ->
+         Printf.sprintf "%s %s" (sou base (get_first_name p))
+           (sou base (get_surname p)))
+      (fun _ -> ".")
+   in
+   raise @@ Update.ModErr err
 
 let print_cannot_change_sex conf base p =
 #ifdef API
-  if !(Api_conf.mode_api) then
-    begin let err =
-      Printf.sprintf "%s."
-        (capitale (transl conf "cannot change sex of a married person"))
-    in
-      raise (Update.ModErrApi err)
-    end;
+  if not !Api_conf.mode_api then begin
 #endif
   let title _ = Wserver.printf "%s" (capitale (transl conf "error")) in
   Hutil.rheader conf title;
   Update.print_error conf base (BadSexOfMarriedPerson p);
-  Wserver.printf "<ul>\n";
-  html_li conf;
-  Wserver.printf "\n%s" (referenced_person_text conf base p);
-  Wserver.printf "\n";
-  Wserver.printf "</ul>\n";
+  Wserver.printf "<ul><li>%s</li></ul>" (referenced_person_text conf base p);
   Update.print_return conf;
   Hutil.trailer conf;
-  raise Update.ModErr
+#ifdef API
+  end;
+#endif
+  let err =
+    Printf.sprintf "%s." (capitale (transl conf "cannot change sex of a married person"))
+  in
+  raise @@ Update.ModErr err
 
 let check_conflict conf base sp ipl =
   let name = Name.lower (sp.first_name ^ " " ^ sp.surname) in
   List.iter
     (fun ip ->
        let p1 = poi base ip in
-       if get_key_index p1 <> sp.key_index &&
+       if get_iper p1 <> sp.key_index &&
           Name.lower (p_first_name base p1 ^ " " ^ p_surname base p1) =
             name &&
           get_occ p1 = sp.occ
@@ -939,18 +940,6 @@ let effective_mod conf base sp =
     begin let ipl = Gutil.person_ht_find_all base key in
       check_conflict conf base sp ipl; rename_image_file conf base op sp
     end;
-  let same_fn_sn =
-    Name.lower (Mutil.nominative sp.first_name) = Name.lower ofn &&
-    Name.lower (Mutil.nominative sp.surname) = Name.lower osn
-  in
-  if sp.first_name <> "?" && sp.surname <> "?" &&
-     (not same_fn_sn || oocc <> sp.occ)
-  then
-    begin
-      delete_key base ofn osn oocc;
-      patch_key base pi sp.first_name sp.surname sp.occ;
-      if not same_fn_sn then patch_name base key pi
-    end;
   (* Si on modifie la personne pour lui ajouter un nom/prénom, alors *)
   (* il faut remettre le compteur du nombre de personne à jour.      *)
   if ofn = "?" && osn = "?" && sp.first_name <> "?" && sp.surname <> "?" then
@@ -962,13 +951,7 @@ let effective_mod conf base sp =
     Futil.map_person_ps (Update.insert_person conf base "" created_p)
       (Gwdb.insert_string base) sp
   in
-  let op_misc_names = person_misc_names base op get_titles in
   let np = {np with related = get_related op} in
-  let np_misc_names = gen_person_misc_names base np (fun p -> p.titles) in
-  List.iter
-    (fun key ->
-       if List.mem key op_misc_names then () else Gutil.person_ht_add base key pi)
-    np_misc_names;
   let ol_rparents = rparents_of (get_rparents op) in
   let nl_rparents = rparents_of np.rparents in
   let ol_pevents = pwitnesses_of (get_pevents op) in
@@ -978,14 +961,12 @@ let effective_mod conf base sp =
   let pi = np.key_index in Update.update_related_pointers base pi ol nl; np
 
 let effective_add conf base sp =
-  let pi = Adef.iper_of_int (nb_of_persons base) in
+  let pi = Gwdb.insert_person base (Gwdb.empty_person base Gwdb.dummy_iper) in
   let fn = Util.translate_eval sp.first_name in
   let sn = Util.translate_eval sp.surname in
   let key = fn ^ " " ^ sn in
   let ipl = Gutil.person_ht_find_all base key in
   check_conflict conf base sp ipl;
-  patch_key base pi fn sn sp.occ;
-  Gutil.person_ht_add base key pi;
   patch_cache_info conf Util.cache_nb_base_persons
     (fun v -> let v = int_of_string v + 1 in string_of_int v);
   let created_p = ref [] in
@@ -998,8 +979,7 @@ let effective_add conf base sp =
   patch_ascend base pi na;
   let nu = {family = [| |]} in
   patch_union base pi nu;
-  let np_misc_names = gen_person_misc_names base np (fun p -> p.titles) in
-  List.iter (fun key -> Gutil.person_ht_add base key pi) np_misc_names; np, na
+  np, na
 
 let array_except v a =
   let rec loop i =
@@ -1095,7 +1075,7 @@ let update_relations_of_related base ip old_related =
 let effective_del base warning p =
   let none = Gwdb.insert_string base "?" in
   let empty = Gwdb.insert_string base "" in
-  let ip = get_key_index p in
+  let ip = get_iper p in
   begin match get_parents p with
     Some ifam ->
       let des = foi base ifam in
@@ -1298,35 +1278,32 @@ let print_add o_conf base =
   (* zéro pour la détection des caractères interdits *)
   let () = removed_string := [] in
   let conf = Update.update_conf o_conf in
-  try
-    let (sp, ext) = reconstitute_person conf in
-    let redisp =
-      match p_getenv conf.env "return" with
-        Some _ -> true
-      | _ -> false
-    in
-    if ext || redisp then UpdateInd.print_update_ind conf base sp ""
-    else
-      let sp = strip_person sp in
-      match check_person conf sp with
-        Some err -> error_person conf err
-      | None ->
-          let (p, a) = effective_add conf base sp in
-          let u = {family = get_family (poi base p.key_index)} in
-          let wl = all_checks_person base p a u in
-          Util.commit_patches conf base;
-          let changed = U_Add_person (Util.string_gen_person base p) in
-          History.record conf base changed "ap"; print_add_ok conf base wl p
-  with Update.ModErr -> ()
+  let (sp, ext) = reconstitute_person conf in
+  let redisp =
+    match p_getenv conf.env "return" with
+      Some _ -> true
+    | _ -> false
+  in
+  if ext || redisp then UpdateInd.print_update_ind conf base sp ""
+  else
+    let sp = strip_person sp in
+    match check_person conf sp with
+      Some err -> error_person conf err
+    | None ->
+      let (p, a) = effective_add conf base sp in
+      let u = {family = get_family (poi base p.key_index)} in
+      let wl = all_checks_person base p a u in
+      Util.commit_patches conf base;
+      let changed = U_Add_person (Util.string_gen_person base p) in
+      History.record conf base changed "ap"; print_add_ok conf base wl p
 
 let print_del conf base =
-  match p_getint conf.env "i" with
+  match p_getenv conf.env "i" with
     Some i ->
-      let ip = Adef.iper_of_int i in
+      let ip = iper_of_string i in
       let p = poi base ip in
       let fn = sou base (get_first_name p) in
       let sn = sou base (get_surname p) in
-      let occ = get_occ p in
       let old_related = get_related p in
       let op = Util.string_gen_person base (gen_person_of_person p) in
       update_relations_of_related base ip old_related;
@@ -1336,7 +1313,6 @@ let print_del conf base =
       if fn <> "?" && sn <> "?" then
         patch_cache_info conf Util.cache_nb_base_persons
           (fun v -> let v = int_of_string v - 1 in string_of_int v);
-      delete_key base fn sn occ;
       Notes.update_notes_links_db conf (NotesLinks.PgInd p.key_index) "";
       Util.commit_patches conf base;
       let changed = U_Delete_person op in
@@ -1345,37 +1321,35 @@ let print_del conf base =
   | _ -> Hutil.incorrect_request conf
 
 let print_mod_aux conf base callback =
-  try
-    let (p, ext) = reconstitute_person conf in
-    let redisp =
-      match p_getenv conf.env "return" with
-        Some _ -> true
-      | _ -> false
-    in
-    let ini_ps = UpdateInd.string_person_of base (poi base p.key_index) in
-    let digest = Update.digest_person ini_ps in
-    if digest = raw_get conf "digest" then
-      if ext || redisp then UpdateInd.print_update_ind conf base p digest
-      else
-        let p = strip_person p in
-        match check_person conf p with
-          Some err -> error_person conf err
-        | None -> callback p
-    else Update.error_digest conf
-  with Update.ModErr -> ()
+  let (p, ext) = reconstitute_person conf in
+  let redisp =
+    match p_getenv conf.env "return" with
+      Some _ -> true
+    | _ -> false
+  in
+  let ini_ps = UpdateInd.string_person_of base (poi base p.key_index) in
+  let digest = Update.digest_person ini_ps in
+  if digest = raw_get conf "digest" then
+    if ext || redisp then UpdateInd.print_update_ind conf base p digest
+    else
+      let p = strip_person p in
+      match check_person conf p with
+        Some err -> error_person conf err
+      | None -> callback p
+  else Update.error_digest conf
 
 let print_mod o_conf base =
   (* Attention ! On pense à remettre les compteurs à *)
   (* zéro pour la détection des caractères interdits *)
   let () = removed_string := [] in
   let o_p =
-    match p_getint o_conf.env "i" with
+    match p_getenv o_conf.env "i" with
       Some ip ->
         Util.string_gen_person base
-          (gen_person_of_person (poi base (Adef.iper_of_int ip)))
+          (gen_person_of_person (poi base (iper_of_string ip)))
     | None ->
         Util.string_gen_person base
-          (gen_person_of_person (poi base (Adef.iper_of_int (-1))))
+          (gen_person_of_person (poi base dummy_iper))
   in
   let ofn = o_p.first_name in
   let osn = o_p.surname in
@@ -1411,11 +1385,6 @@ let print_mod o_conf base =
       String.concat " " (List.map (sou base) sl)
     in
     Notes.update_notes_links_db conf (NotesLinks.PgInd p.key_index) s;
-    if not (eq_istr (get_surname op) p.surname) ||
-       not (Futil.eq_lists eq_istr (get_surnames_aliases op) p.surnames_aliases) ||
-       not (Futil.eq_lists (Futil.eq_titles eq_istr) (get_titles op) p.titles)
-    then
-      Update.update_misc_names_of_family base p.sex u;
     let wl =
       let a = poi base p.key_index in
       let a = {parents = get_parents a; consang = get_consang a} in
@@ -1424,49 +1393,43 @@ let print_mod o_conf base =
     Util.commit_patches conf base;
     let changed = U_Modify_person (o_p, Util.string_gen_person base p) in
     History.record conf base changed "mp";
-    if not (is_quest_string p.surname) &&
-       not (is_quest_string p.first_name) && not (is_old_person conf p)
-    then
-      Update.delete_topological_sort_v conf base;
+    Update.delete_topological_sort_v conf base;
     print_mod_ok conf base wl pgl p ofn osn oocc
   in
   print_mod_aux conf base callback
 
 let print_change_event_order conf base =
-  match p_getint conf.env "i" with
-    Some ip ->
-      begin try
-        let p = poi base (Adef.iper_of_int ip) in
-        let o_p = Util.string_gen_person base (gen_person_of_person p) in
-        let ht = Hashtbl.create 50 in
-        let _ =
-          List.fold_left (fun id evt -> Hashtbl.add ht id evt; succ id) 1
-            (get_pevents p)
-        in
-        let sorted_pevents =
-          List.sort (fun (_, pos1) (_, pos2) -> compare pos1 pos2)
-            (reconstitute_sorted_pevents conf 1)
-        in
-        let pevents =
-          List.fold_right
-            (fun (id, _) accu ->
-               try Hashtbl.find ht id :: accu with
-                 Not_found -> failwith "Sorting event")
-            sorted_pevents []
-        in
-        let p = gen_person_of_person p in
-        let p = {p with pevents = pevents} in
-        patch_person base p.key_index p;
-        let wl =
-          let a = poi base p.key_index in
-          let a = {parents = get_parents a; consang = get_consang a} in
-          let u = poi base p.key_index in
-          let u = {family = get_family u} in all_checks_person base p a u
-        in
-        Util.commit_patches conf base;
-        let changed = U_Modify_person (o_p, Util.string_gen_person base p) in
-        History.record conf base changed "mp";
-        print_change_event_order_ok conf base wl p
-      with Update.ModErr -> ()
-      end
+  match p_getenv conf.env "i" with
+  | Some ip ->
+    let p = poi base (iper_of_string ip) in
+    let o_p = Util.string_gen_person base (gen_person_of_person p) in
+    let ht = Hashtbl.create 50 in
+    let _ =
+      List.fold_left (fun id evt -> Hashtbl.add ht id evt; succ id) 1
+        (get_pevents p)
+    in
+    let sorted_pevents =
+      List.sort (fun (_, pos1) (_, pos2) -> compare pos1 pos2)
+        (reconstitute_sorted_pevents conf 1)
+    in
+    let pevents =
+      List.fold_right
+        (fun (id, _) accu ->
+           try Hashtbl.find ht id :: accu with
+             Not_found -> failwith "Sorting event")
+        sorted_pevents []
+    in
+    let p = gen_person_of_person p in
+    let p = {p with pevents = pevents} in
+    patch_person base p.key_index p;
+    let wl =
+      let a = poi base p.key_index in
+      let a = {parents = get_parents a; consang = get_consang a} in
+      let u = poi base p.key_index in
+      let u = {family = get_family u} in all_checks_person base p a u
+    in
+    Util.commit_patches conf base;
+    let changed = U_Modify_person (o_p, Util.string_gen_person base p) in
+    History.record conf base changed "mp";
+    print_change_event_order_ok conf base wl p
   | _ -> Hutil.incorrect_request conf

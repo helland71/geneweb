@@ -1,44 +1,53 @@
 (* $Id: date.mli,v 5.4 2007-03-14 00:39:57 ddr Exp $ *)
 (* Copyright (c) 1998-2007 INRIA *)
 
-open Config
 open Def
 open Gwdb
 
+val leap_year : int -> bool
+
+val nb_days_in_month : int -> int -> int
+
+(** [time_elapsed start stop]
+    Compute the time elapsed between [start] and [stop].
+    If [stop] is prior to [start], resulting [dmy]'s field
+    are negative (but correct). *)
+val time_elapsed : Def.dmy -> Def.dmy -> Def.dmy
+
+val date_of_death : Def.death -> Adef.date option
+
+(** [dmy_of_dmy2 dmy2]
+    Convert a [dmy2] to [dmy] using [Sure] as precision. *)
 val dmy_of_dmy2 : dmy2 -> dmy
-val code_dmy : config -> dmy -> string
-val string_of_ondate : config -> date -> string
-val string_of_ondate_aux : config -> date -> string
-val string_of_date : config -> date -> string
-val string_of_date_sep : config -> string -> date -> string
-val string_slash_of_date : config -> date -> string
-val string_of_age : config -> dmy -> string
-val prec_year_text : config -> dmy -> string
-val prec_text : config -> dmy -> string
-val day_text : dmy -> string
-val month_text : dmy -> string
-val year_text : dmy -> string
-val short_dates_text : config -> base -> person -> string
-val short_marriage_date_text :
-  config -> base -> family -> person -> person -> string
-val print_dates : config -> base -> person -> unit
+
+(** [get_birth_death p]
+    Return [(birth, death, approx)]. If birth/death date can not be found,
+    baptism/burial date is used and [approx] is set to [true] (it is [false]
+    if both birth and death dates are found).
+*)
 val get_birth_death_date : person -> date option * date option * bool
 
-val before_date : dmy -> dmy -> bool
-  (* [before_date d1 d2] = True if d2 before d1; I know, it is not logical *)
+(** [Not_comparable] is raised by [compare_dmy] and [compare_date] when
+    [strict] mode is used and precision of dates are incompatibles to
+    have a reliable result
+    (e.g. is [compare_dmy 2019 07/2019]) *)
+exception Not_comparable
 
-(* return the day of the week given the date as parameter *)
-val get_wday : config -> date -> string
+(** [compare_dmy ?strict d1 d2]
+    Return a negative integer if [d1] is prior to [d2],
+    [0] if [d1] is equal to [d2],
+    and a positive integer if [d2] is prior to [d1].
+    [strict] parameter enable or disable strict mode, and
+    is false by default (see [Not_comparable])
+*)
+val compare_dmy : ?strict:bool -> dmy -> dmy -> int
 
-val compare_date : date -> date -> int
-
-(* Ajout pour l'API *)
-val death_symbol : config -> string
-val string_of_dmy : config -> dmy -> string
-val string_of_on_french_dmy : config -> dmy -> string
-val string_of_on_hebrew_dmy : config -> dmy -> string
-val string_of_prec_dmy : config -> string -> string -> dmy -> string
-val gregorian_precision : config -> dmy -> string
-val french_month : config -> int -> string
-val code_french_year : config -> int -> string
-val code_hebrew_date : config -> int -> int -> int -> string
+(** [compare_date d1 d2]
+    If both [d1] and [d2] are [Dgreg] date, uses [compare_dmy]
+    to compare them.
+    [Dtext] dates are always considered prior to any [Dgreg] date,
+    and equal to any other [Dtext] date.
+    [strict] parameter enable or disable strict mode, and
+    is false by default (see [Not_comparable])
+*)
+val compare_date : ?strict:bool -> date -> date -> int

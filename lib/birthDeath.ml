@@ -1,4 +1,3 @@
-(* $Id: birthDeath.ml,v 5.40 2008-11-03 15:40:10 ddr Exp $ *)
 (* Copyright (c) 1998-2007 INRIA *)
 
 open Config
@@ -19,7 +18,9 @@ let select conf base get_date find_oldest =
       (struct
          type t = Gwdb.person * Def.dmy * Def.calendar
          let leq (_, x, _) (_, y, _) =
-           if find_oldest then Date.before_date x y else Date.before_date y x
+           if find_oldest
+           then Date.compare_dmy y x <= 0
+           else Date.compare_dmy x y <= 0
        end)
   in
   let n = min (max 0 (get_k conf)) (nb_of_persons base) in
@@ -39,38 +40,40 @@ let select conf base get_date find_oldest =
         Some {day = bd; month = bm; year = by; prec = Sure; delta = 0}
     | None -> None
   in
-  let rec loop q len i =
-    if i = nb_of_persons base then
-      let rec loop list q =
-        if Q.is_empty q then list, len
-        else let (e, q) = Q.take q in loop (e :: list) q
-      in
-      loop [] q
-    else
-      let p = pget conf base (Adef.iper_of_int i) in
-      match get_date p with
-        Some (Dgreg (d, cal)) ->
+  let (q, len) =
+    Gwdb.Collection.fold (fun (q, len) i ->
+        let p = pget conf base i in
+        match get_date p with
+        | Some (Dgreg (d, cal)) ->
           let aft =
             match ref_date with
-              Some ref_date -> Date.before_date d ref_date
+            | Some ref_date -> Date.compare_dmy ref_date d <= 0
             | None -> false
           in
-          if aft then loop q len (i + 1)
+          if aft then (q, len)
           else
             let e = p, d, cal in
-            if len < n then loop (Q.add e q) (len + 1) (i + 1)
-            else loop (snd (Q.take (Q.add e q))) len (i + 1)
-      | _ -> loop q len (i + 1)
+            if len < n then ((Q.add e q), (len + 1))
+            else ((snd (Q.take (Q.add e q))), len)
+        | _ -> (q, len)
+      ) (Q.empty, 0) (Gwdb.ipers base)
   in
-  loop Q.empty 0 0
+  let rec loop list q =
+    if Q.is_empty q then list, len
+    else let (e, q) = Q.take q in loop (e :: list) q
+  in
+  loop [] q
 
+(* TODO? Factorize with select_person? *)
 let select_family conf base get_date find_oldest =
   let module QF =
     Pqueue.Make
       (struct
-         type t = Adef.ifam * Gwdb.family * Def.dmy * Def.calendar
+         type t = Gwdb.ifam * Gwdb.family * Def.dmy * Def.calendar
          let leq (_, _, x, _) (_, _, y, _) =
-           if find_oldest then Date.before_date x y else Date.before_date y x
+           if find_oldest
+           then Date.compare_dmy y x <= 0
+           else Date.compare_dmy x y <= 0
        end)
   in
   let n = min (max 0 (get_k conf)) (nb_of_families base) in
@@ -90,32 +93,29 @@ let select_family conf base get_date find_oldest =
         Some {day = bd; month = bm; year = by; prec = Sure; delta = 0}
     | None -> None
   in
-  let rec loop q len i =
-    if i = nb_of_families base then
-      let rec loop list q =
-        if QF.is_empty q then list, len
-        else let (e, q) = QF.take q in loop (e :: list) q
-      in
-      loop [] q
-    else
-      let fam = foi base (Adef.ifam_of_int i) in
-      if is_deleted_family fam then loop q len (i + 1)
-      else
-        match get_date (Adef.ifam_of_int i) fam with
-          Some (Dgreg (d, cal)) ->
+  let (q, len) =
+    Gwdb.Collection.fold (fun (q, len) i ->
+        let fam = foi base i in
+        match get_date i fam with
+          | Some (Dgreg (d, cal)) ->
             let aft =
               match ref_date with
-                Some ref_date -> Date.before_date d ref_date
+              | Some ref_date -> Date.compare_dmy ref_date d <= 0
               | None -> false
             in
-            if aft then loop q len (i + 1)
+            if aft then (q, len)
             else
-              let e = Adef.ifam_of_int i, fam, d, cal in
-              if len < n then loop (QF.add e q) (len + 1) (i + 1)
-              else loop (snd (QF.take (QF.add e q))) len (i + 1)
-        | _ -> loop q len (i + 1)
+              let e = i, fam, d, cal in
+              if len < n then (QF.add e q, len + 1)
+              else (snd (QF.take (QF.add e q)), len)
+          | _ -> (q, len)
+      ) (QF.empty, 0) (Gwdb.ifams base)
   in
-  loop QF.empty 0 0
+  let rec loop list q =
+    if QF.is_empty q then list, len
+    else let (e, q) = QF.take q in loop (e :: list) q
+  in
+  loop [] q
 
 let print_birth conf base =
   let (list, len) =
@@ -132,9 +132,9 @@ let print_birth conf base =
       (fun (last_month_txt, was_future) (p, d, cal) ->
          let month_txt =
            let d = {d with day = 0} in
-           capitale (Date.string_of_date conf (Dgreg (d, cal)))
+           capitale (DateDisplay.string_of_date conf (Dgreg (d, cal)))
          in
-         let future = CheckItem.strictly_after_dmy d conf.today in
+         let future = Date.compare_dmy d conf.today = 1 in
          if not future && was_future then
            begin
              Wserver.printf "</li>\n</ul>\n</li>\n</ul>\n<p>\n<ul>\n";
@@ -155,11 +155,11 @@ let print_birth conf base =
          Wserver.printf ",\n";
          if future then
            Wserver.printf "<em>%s</em>.\n"
-             (Date.string_of_date conf (Dgreg (d, cal)))
+             (DateDisplay.string_of_date conf (Dgreg (d, cal)))
          else
            Wserver.printf "%s <em>%s</em>.\n"
              (transl_nth conf "born" (index_of_sex (get_sex p)))
-             (Date.string_of_ondate conf (Dgreg (d, cal)));
+             (DateDisplay.string_of_ondate conf (Dgreg (d, cal)));
          Wserver.printf "</li>\n";
          month_txt, future)
       ("", false) list
@@ -187,7 +187,7 @@ let print_death conf base =
           (fun (last_month_txt, ages_sum, ages_nb) (p, d, cal) ->
              let month_txt =
                let d = {d with day = 0} in
-               capitale (Date.string_of_date conf (Dgreg (d, cal)))
+               capitale (DateDisplay.string_of_date conf (Dgreg (d, cal)))
              in
              if month_txt <> last_month_txt then
                begin
@@ -201,7 +201,7 @@ let print_death conf base =
                match Adef.od_of_cdate (get_birth p) with
                  Some (Dgreg (d1, _)) ->
                    if sure d1 && sure d && d1 <> d then
-                     let a = CheckItem.time_elapsed d1 d in
+                     let a = Date.time_elapsed d1 d in
                      let ages_sum =
                        match get_sex p with
                          Male -> fst ages_sum + a.year, snd ages_sum
@@ -224,10 +224,10 @@ let print_death conf base =
              Wserver.printf "</b>";
              Wserver.printf ", %s <em>%s</em>"
                (transl_nth conf "died" (index_of_sex (get_sex p)))
-               (Date.string_of_ondate conf (Dgreg (d, cal)));
+               (DateDisplay.string_of_ondate conf (Dgreg (d, cal)));
              begin match age with
                Some a ->
-                 Wserver.printf " <em>(%s)</em>" (Date.string_of_age conf a)
+                 Wserver.printf " <em>(%s)</em>" (DateDisplay.string_of_age conf a)
              | None -> ()
              end;
              Wserver.printf "</li>\n";
@@ -239,7 +239,7 @@ let print_death conf base =
         Wserver.printf "%s (%s) : %s<br%s>\n"
           (capitale (transl conf "average age at death"))
           (transl_nth conf "M/F" 0)
-          (Date.string_of_age conf
+          (DateDisplay.string_of_age conf
              {day = 0; month = 0; year = fst ages_sum / fst ages_nb;
               delta = 0; prec = Sure})
           conf.xhs;
@@ -247,7 +247,7 @@ let print_death conf base =
         Wserver.printf "%s (%s) : %s<br%s>\n"
           (capitale (transl conf "average age at death"))
           (transl_nth conf "M/F" 1)
-          (Date.string_of_age conf
+          (DateDisplay.string_of_age conf
              {day = 0; month = 0; year = snd ages_sum / snd ages_nb;
               delta = 0; prec = Sure})
           conf.xhs;
@@ -334,10 +334,10 @@ let print_oldest_alive conf base =
        Wserver.printf "<b>%s</b>,\n" (referenced_person_text conf base p);
        Wserver.printf "%s <em>%s</em>"
          (transl_nth conf "born" (index_of_sex (get_sex p)))
-         (Date.string_of_ondate conf (Dgreg (d, cal)));
+         (DateDisplay.string_of_ondate conf (Dgreg (d, cal)));
        if get_death p = NotDead && d.prec = Sure then
-         begin let a = CheckItem.time_elapsed d conf.today in
-           Wserver.printf " <em>(%s)</em>" (Date.string_of_age conf a)
+         begin let a = Date.time_elapsed d conf.today in
+           Wserver.printf " <em>(%s)</em>" (DateDisplay.string_of_age conf a)
          end;
        Wserver.printf ".";
        Wserver.printf "</li>\n")
@@ -352,7 +352,7 @@ let print_longest_lived conf base =
         Some (Dgreg (bd, _)), Death (_, cd) ->
           begin match Adef.date_of_cdate cd with
             Dgreg (dd, _) ->
-              Some (Dgreg (CheckItem.time_elapsed bd dd, Dgregorian))
+              Some (Dgreg (Date.time_elapsed bd dd, Dgregorian))
           | _ -> None
           end
       | _ -> None
@@ -371,7 +371,7 @@ let print_longest_lived conf base =
        Wserver.printf "<li>\n";
        Wserver.printf "<strong>\n";
        Wserver.printf "%s" (referenced_person_text conf base p);
-       Wserver.printf "</strong>%s" (Date.short_dates_text conf base p);
+       Wserver.printf "</strong>%s" (DateDisplay.short_dates_text conf base p);
        Wserver.printf "\n(%d %s)" d.year (transl conf "years old");
        Wserver.printf ".";
        Wserver.printf "</li>\n")
@@ -388,10 +388,10 @@ let print_marr_or_eng conf base title list =
       (fun (last_month_txt, was_future) (ifam, fam, d, cal) ->
          let month_txt =
            let d = {d with day = 0} in
-           capitale (Date.string_of_date conf (Dgreg (d, cal)))
+           capitale (DateDisplay.string_of_date conf (Dgreg (d, cal)))
          in
          let cpl = foi base ifam in
-         let future = CheckItem.strictly_after_dmy d conf.today in
+         let future = Date.compare_dmy d conf.today > 0 in
          if not future && was_future then
            begin
              Wserver.printf "</ul>\n</li>\n</ul>\n<ul>\n";
@@ -420,7 +420,7 @@ let print_marr_or_eng conf base title list =
          Wserver.printf ",\n";
          if future then
            Wserver.printf "<em>%s</em>."
-             (Date.string_of_date conf (Dgreg (d, cal)))
+             (DateDisplay.string_of_date conf (Dgreg (d, cal)))
          else
            Wserver.printf "%s <em>%s</em>."
              (match get_relation fam with
@@ -428,8 +428,13 @@ let print_marr_or_eng conf base title list =
                   transl_nth conf "relation/relations" 0
               | Married | NoSexesCheckMarried -> transl conf "married"
               | Engaged -> transl conf "engaged"
+              | MarriageBann
+              | MarriageContract
+              | MarriageLicense
+              | Pacs
+              | Residence
               | NoMention -> "")
-             (Date.string_of_ondate conf (Dgreg (d, cal)));
+             (DateDisplay.string_of_ondate conf (Dgreg (d, cal)));
          Wserver.printf "</li>\n";
          month_txt, future)
       ("", false) list
@@ -560,33 +565,29 @@ let make_population_pyramid ~nb_intervals ~interval ~limit ~at_date conf base =
   let men = Array.make (nb_intervals + 1) 0 in
   let wom = Array.make (nb_intervals + 1) 0 in
   (* TODO? Load person array *)
-  for i = 0 to nb_of_persons base - 1 do
-    let p = pget conf base (Adef.iper_of_int i) in
-    let sex = get_sex p in
-    let dea = get_death p in
-    if sex <> Neuter then
-      match Adef.od_of_cdate (get_birth p) with
-        Some (Dgreg (dmy, _)) ->
-        if not (Date.before_date dmy at_date) then
-          let a = CheckItem.time_elapsed dmy at_date in
-          let j = min nb_intervals (a.year / interval) in
-          let ok =
-            if dea = NotDead || dea = DontKnowIfDead && a.year < limit then
-              true
-            else
-              match dea with
-                Death (_, cd) ->
-                begin match Adef.date_of_cdate cd with
-                    Dgreg (d, _) -> Date.before_date d at_date
-                  | _ -> false
-                end
-              | _ -> false
-          in
-          if ok then
-            if sex = Male then men.(j) <- men.(j) + 1
-            else wom.(j) <- wom.(j) + 1
-      | Some (Dtext _) | None -> ()
-  done;
+  Gwdb.Collection.iter (fun i ->
+      let p = pget conf base i in
+      let sex = get_sex p in
+      let dea = get_death p in
+      if sex <> Neuter then
+        match Adef.od_of_cdate (get_birth p) with
+        | Some (Dgreg (dmy, _)) ->
+          if Date.compare_dmy dmy at_date <= 0 then
+            let a = Date.time_elapsed dmy at_date in
+            let j = min nb_intervals (a.year / interval) in
+            if (dea = NotDead || dea = DontKnowIfDead && a.year < limit)
+            || match dea with
+            | Death (_, cd) ->
+              begin match Adef.date_of_cdate cd with
+                | Dgreg (d, _) -> Date.compare_dmy d at_date > 0
+                | _ -> false
+              end
+            | _ -> false
+            then
+              if sex = Male then men.(j) <- men.(j) + 1
+              else wom.(j) <- wom.(j) + 1
+        | Some (Dtext _) | None -> ()
+    ) (Gwdb.ipers base) ;
   (men, wom)
 
 let print_population_pyramid conf base =
@@ -609,7 +610,7 @@ let print_population_pyramid conf base =
   let men, wom = make_population_pyramid ~nb_intervals ~interval ~limit ~at_date conf base in
   let at_year = at_date.year in
   let string_of_nb n =
-    Sosa.to_string_sep (transl conf "(thousand separator)") (Sosa.of_int n)
+    Mutil.string_of_int_sep (transl conf "(thousand separator)") n
   in
   let title _ =
     Wserver.printf "%s (%d)" (capitale (transl conf "population pyramid"))

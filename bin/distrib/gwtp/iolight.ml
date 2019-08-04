@@ -28,7 +28,7 @@ type patches =
     p_couple : (int * couple) list ref;
     p_descend : (int * descend) list ref;
     p_string : (int * string) list ref;
-    p_name : (int * iper list) list ref }
+    p_name : (int * Gwdb.iper list) list ref }
 
 let rec patch_len len =
   function
@@ -231,6 +231,7 @@ let input bname =
      commit_notes = commit_notes;
      patched_ascends =
        (fun _ -> raise (Match_failure ("gwtp/iolight.ml", 231, 23)));
-     is_patched_person = (fun _ -> false); cleanup = cleanup}
+     cleanup = cleanup
+    }
   in
   {data = base_data; func = base_func}

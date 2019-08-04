@@ -48,7 +48,7 @@ let compact_list base xl =
   List.fold_right
     (fun p pl ->
        match pl with
-         p1 :: _ when get_key_index p = get_key_index p1 -> pl
+         p1 :: _ when get_iper p = get_iper p1 -> pl
        | _ -> p :: pl)
     pl []
 
@@ -90,12 +90,12 @@ let try_find_with_one_first_name conf base n =
 
 let find_all conf base an =
   let sosa_ref = Util.find_sosa_ref conf base in
-  let sosa_nb = try Some (Sosa.of_string an) with Failure _ -> None in
+  let sosa_nb = try Some (Sosa.of_string an) with _ -> None in
   match sosa_ref, sosa_nb with
     Some p, Some n ->
     if n <> Sosa.zero then
-      match Util.branch_of_sosa conf base (get_key_index p) n with
-        Some ((ip, _) :: _) -> [pget conf base ip], true
+      match Util.branch_of_sosa conf base n p with
+        Some (p :: _) -> [p], true
       | _ -> [], false
     else [], false
   | _ ->
@@ -158,12 +158,12 @@ let find_all conf base an =
 
 let relation_print conf base p =
   let p1 =
-    match p_getint conf.senv "ei" with
+    match p_getenv conf.senv "ei" with
     | Some i ->
       conf.senv <- [];
-      if i >= 0 && i < nb_of_persons base then
-        Some (pget conf base (Adef.iper_of_int i))
-      else None
+      (* if i >= 0 && i < nb_of_persons base then *)
+        Some (pget conf base (iper_of_string i))
+      (* else None *)
     | None ->
       match find_person_in_env conf base "1" with
         Some p1 -> conf.senv <- []; Some p1
@@ -236,7 +236,7 @@ let specify conf base n pl =
            List.iter
              (fun t -> Wserver.printf "%s" (one_title_text base t)) tl
        end;
-       Wserver.printf "%s" (Date.short_dates_text conf base p);
+       Wserver.printf "%s" (DateDisplay.short_dates_text conf base p);
        if authorized_age conf base p then
          begin match get_first_names_aliases p with
              [] -> ()
@@ -250,13 +250,13 @@ let specify conf base n pl =
              Wserver.printf ")</em>"
          end;
        begin let spouses =
-               List.fold_right
+               Array.fold_right
                  (fun ifam spouses ->
                     let cpl = foi base ifam in
-                    let spouse = pget conf base (Gutil.spouse (get_key_index p) cpl) in
+                    let spouse = pget conf base (Gutil.spouse (get_iper p) cpl) in
                     if p_surname base spouse <> "?" then spouse :: spouses
                     else spouses)
-                 (Array.to_list (get_family p)) []
+                 (get_family p) []
          in
          match spouses with
            [] -> ()
@@ -336,7 +336,6 @@ and handler =
   ; linked : handler_base
   ; ll : handler_base
   ; lm : handler_base
-  ; lex : handler_base
   ; misc_notes : handler_base
   ; misc_notes_search : handler_base
   ; mod_data : handler_base
@@ -386,7 +385,6 @@ and handler =
 #ifdef API
   ; api_all_persons : handler_base
   ; api_all_families : handler_base
-  ; api_anniversary : handler_base
   ; api_base_warnings : handler_base
   ; api_close_persons : handler_base
   ; api_cpl_rel : handler_base
@@ -410,10 +408,6 @@ and handler =
   ; api_max_ancestors : handler_base
   ; api_nb_ancestors : handler_base
   ; api_notification_birthday : handler_base
-  ; api_print_index : handler_base
-  ; api_print_export : handler_base
-  ; api_print_export_search : handler_base
-  ; api_print_synchro : handler_base
   ; api_ref_person_from_id : handler_base
   ; api_remove_image_ext : handler_base
   ; api_remove_image_ext_all : handler_base
@@ -446,6 +440,7 @@ and handler =
   ; api_link_tree : handler_base
   ; api_stats : handler_base
   ; api_add_first_fam : handler_nobase
+  ; api_select_events : handler_base
 #endif
   ; fallback : string -> handler_base
   }
@@ -515,7 +510,6 @@ let dummyHandler =
   ; linked = dummy_base
   ; ll = dummy_base
   ; lm = dummy_base
-  ; lex = dummy_base
   ; misc_notes = dummy_base
   ; misc_notes_search = dummy_base
   ; mod_data = dummy_base
@@ -565,7 +559,6 @@ let dummyHandler =
 #ifdef API
   ; api_all_persons = dummy_base
   ; api_all_families = dummy_base
-  ; api_anniversary = dummy_base
   ; api_base_warnings = dummy_base
   ; api_close_persons = dummy_base
   ; api_cpl_rel = dummy_base
@@ -589,10 +582,6 @@ let dummyHandler =
   ; api_max_ancestors = dummy_base
   ; api_nb_ancestors = dummy_base
   ; api_notification_birthday = dummy_base
-  ; api_print_index = dummy_base
-  ; api_print_export = dummy_base
-  ; api_print_export_search = dummy_base
-  ; api_print_synchro = dummy_base
   ; api_ref_person_from_id = dummy_base
   ; api_remove_image_ext = dummy_base
   ; api_remove_image_ext_all = dummy_base
@@ -625,6 +614,7 @@ let dummyHandler =
   ; api_link_tree = dummy_base
   ; api_stats = dummy_base
   ; api_add_first_fam = dummy_nobase
+  ; api_select_events = dummy_base
 #endif
   ; fallback = dummy_base
   }
@@ -633,7 +623,7 @@ let person_selected self conf base p =
   match p_getenv conf.senv "em" with
     Some "R" -> relation_print conf base p
   | Some _ -> self.incorrect_request self conf base
-  | None -> record_visited conf (get_key_index p); Perso.print conf base p
+  | None -> record_visited conf (get_iper p); Perso.print conf base p
 
 let person_selected_with_redirect self conf base p =
   match p_getenv conf.senv "em" with
@@ -663,7 +653,7 @@ let defaultHandler : handler =
       let title _ =
         Wserver.printf "%s: \"%s\"" (capitale (transl conf "not found")) n
       in
-      Wserver.http HttpStatus.Not_Found;
+      Wserver.http Wserver.Not_Found;
       Hutil.rheader conf title;
       Hutil.print_link_to_welcome conf false;
       Hutil.trailer conf
@@ -676,7 +666,7 @@ let defaultHandler : handler =
           Wserver.printf "%s: \"%s %s\"" (capitale (transl conf "not found"))
             fname sname
         in
-        Wserver.http HttpStatus.Not_Found;
+        Wserver.http Wserver.Not_Found;
         Hutil.rheader conf title;
         Hutil.print_link_to_welcome conf false;
         Hutil.trailer conf
@@ -933,10 +923,6 @@ let defaultHandler : handler =
       else self.incorrect_request self conf base
     end
 
-  ; lex = begin fun _self conf base ->
-      Srcfile.print_lexicon conf base
-    end
-
   ; misc_notes = begin fun _self conf base ->
       Notes.print_misc_notes conf base
     end
@@ -1105,7 +1091,7 @@ let defaultHandler : handler =
           end
         | Some i ->
           relation_print conf base
-            (pget conf base (Adef.iper_of_int (int_of_string i)))
+            (pget conf base (iper_of_string i))
       end
     end
 
@@ -1228,10 +1214,6 @@ let defaultHandler : handler =
       Api.print_all_families conf base
     end
 
-  ; api_anniversary = begin fun _self conf base ->
-      Api.print_birthday conf base
-    end
-
   ; api_base_warnings = begin fun _self conf base ->
       if conf.wizard || conf.friend     (* Pour les flex, on autorise en mode friend. *)
       then Api.print_base_warnings conf base
@@ -1323,22 +1305,6 @@ let defaultHandler : handler =
 
   ; api_notification_birthday = begin fun _self conf base ->
       Api.print_notification_birthday conf base
-    end
-
-  ; api_print_index = begin fun _self conf base ->
-      Api.print_all_full_person conf base
-    end
-
-  ; api_print_export = begin fun _self conf base ->
-      Api.print_export conf base
-    end
-
-  ; api_print_export_search = begin fun _self conf base ->
-      Api.print_export_search conf base
-    end
-
-  ; api_print_synchro = begin fun _self conf base ->
-      Api.print_synchro_patch_mobile conf base
     end
 
   ; api_ref_person_from_id = begin fun _self conf base ->
@@ -1484,6 +1450,10 @@ let defaultHandler : handler =
 
   ; api_stats = begin fun _self conf base ->
       Api_stats.print_stats conf base
+    end
+
+  ; api_select_events = begin fun _self conf base ->
+      Api_graph.print_select_events conf base
     end
 
   ; api_add_first_fam = begin fun _self conf ->

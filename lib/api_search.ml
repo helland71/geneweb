@@ -218,18 +218,15 @@ let select_both_all base ini_n ini_p maiden_name =
     loop ini_p []
   in
   let add_maiden p ini_p l =
-    let rec loop ifam_l l =
-      match ifam_l with
-      | [] -> ()
-      | ifam :: q ->
-          let fam = foi base ifam in
-          let ip = Gutil.spouse (get_key_index p) fam in
-          let sp = poi base ip in
-          if List.for_all (fun s -> find_fn sp s) ini_p then l := ip :: !l;
-          loop q l
-    in
     if get_sex p = Male then
-      loop (Array.to_list (get_family p)) l
+      l :=
+        Array.fold_left
+          (fun acc ifam ->
+             let fam = foi base ifam in
+             let ip = Gutil.spouse (get_iper p) fam in
+             let sp = poi base ip in
+             if List.for_all (fun s -> find_fn sp s) ini_p then ip :: acc else acc)
+          !l (get_family p)
   in
   let add_maiden2 p ini_n ini_p l =
     (* On sépare les noms avec tirets ... *)
@@ -238,28 +235,23 @@ let select_both_all base ini_n ini_p maiden_name =
         (fun accu s -> List.rev_append (String.split_on_char '-' s) accu)
         [] ini_n
     in
-    let rec loop ifam_l l =
-      match ifam_l with
-      | [] -> ()
-      | ifam :: q ->
-          let fam = foi base ifam in
-          let ip = Gutil.spouse (get_key_index p) fam in
-          let sp = poi base ip in
-          let names =
-            sou base (get_surname p) ^ " " ^ sou base (get_surname sp)
-          in
-          if List.for_all (fun s -> find_str names s) ini_n then
-            add_maiden p ini_p l;
-          loop q l
-    in
-    if get_sex p = Male then
-      if List.exists (fun s -> find_sn p s) ini_n then
-        loop (Array.to_list (get_family p)) l
+    if get_sex p = Male && List.exists (fun s -> find_sn p s) ini_n
+    then
+      Array.iter
+        (fun ifam ->
+           let fam = foi base ifam in
+           let ip = Gutil.spouse (get_iper p) fam in
+           let sp = poi base ip in
+           let names =
+             sou base (get_surname p) ^ " " ^ sou base (get_surname sp)
+           in
+           if List.for_all (fun s -> find_str names s) ini_n
+           then add_maiden p ini_p l)
+        (get_family p)
   in
   let list = ref [] in
-  for i = 0 to nb_of_persons base - 1 do
-    let ip = Adef.iper_of_int i in
-    let p = poi base ip in
+  Gwdb.Collection.iter begin fun p ->
+    let ip = get_iper p in
     if List.for_all (fun s -> find_sn p s) ini_n then
       begin
         if List.for_all (fun s -> find_fn p s) ini_p then
@@ -269,7 +261,7 @@ let select_both_all base ini_n ini_p maiden_name =
     else
       (* On cherche une partie du nom de jeune fille dans les noms donnés. *)
       if maiden_name then add_maiden2 p ini_n ini_p list
-  done;
+  end (Gwdb.persons base) ;
   !list
 
 let select_all base is_surnames ini =
@@ -295,18 +287,17 @@ let select_all base is_surnames ini =
     loop ini []
   in
   let list = ref [] in
-  for i = 0 to nb_of_persons base - 1 do
-    if List.for_all (fun s -> find (poi base (Adef.iper_of_int i)) s) ini
-    then list := (Adef.iper_of_int i) :: !list
-  done;
+  Gwdb.Collection.iter begin fun p ->
+    if List.for_all (fun s -> find p s) ini
+    then list := get_iper p :: !list
+  end (Gwdb.persons base) ;
   !list
 
 
 module Iper =
   struct
-    type t = Adef.iper
-    let compare i1 i2 =
-      Pervasives.compare (Adef.int_of_iper i1) (Adef.int_of_iper i2)
+    type t = Gwdb.person
+    let compare i1 i2 = Stdlib.compare (get_iper i1) (get_iper i2)
   end
 
 module IperSet = Set.Make(Iper)
@@ -315,10 +306,14 @@ let print_list conf base filters list =
   let person_l =
     IperSet.elements
       (List.fold_left
-         (fun accu p -> IperSet.add p accu)
+         begin fun acc p ->
+           let p = poi base p in
+           if apply_filters_p conf filters Perso.get_sosa_person p
+           then IperSet.add p acc
+           else acc
+         end
          IperSet.empty list)
   in
-  let person_l = List.rev_map (poi base) person_l in
   let person_l =
     if filters.nb_results then person_l
     else
@@ -334,7 +329,7 @@ let print_list conf base filters list =
           else comp)
         person_l
   in
-  let data = data_list_person conf base filters person_l in
+  let data = conv_data_list_person conf base filters person_l in
   print_result conf data
 
 (*
@@ -445,10 +440,7 @@ let select_both_start_with_person base ini_n ini_p =
   in
   let ini_n = cut_at_space (code_varenv (Name.lower ini_n)) [] in
   let ini_p = cut_at_space (code_varenv (Name.lower ini_p)) [] in
-  let rec loop i list nb_res =
-    if (*nb_res < max_res &&*) i < nb_of_persons base then
-      let ip = Adef.iper_of_int i in
-      let p = poi base ip in
+  Gwdb.Collection.fold begin fun list p ->
       let surnames =
         cut_at_space (code_varenv (Name.lower (sou base (get_surname p)))) []
       in
@@ -466,12 +458,9 @@ let select_both_start_with_person base ini_n ini_p =
           (fun ini -> List.exists (fun name -> find name ini) first_names)
           ini_p
       in
-      if start_surname && start_firstname then
-        loop (i + 1) (ip :: list) (nb_res + 1)
-      else loop (i + 1) list nb_res
-    else list
-  in
-  loop 0 [] 0
+      if start_surname && start_firstname then (get_iper p :: list)
+      else list
+  end [] (Gwdb.persons base)
 
 let select_start_with_person base get_field ini =
   let find n x = string_start_with x n in
@@ -485,10 +474,7 @@ let select_start_with_person base get_field ini =
     else (decode_varenv s :: acc)
   in
   let ini = cut_at_space (code_varenv (Name.lower ini)) [] in
-  let rec loop i list nb_res =
-    if (*nb_res < max_res &&*) i < nb_of_persons base then
-      let ip = Adef.iper_of_int i in
-      let p = poi base ip in
+  Gwdb.Collection.fold begin fun list p ->
       let names =
         cut_at_space (code_varenv (Name.lower (sou base (get_field p)))) []
       in
@@ -497,11 +483,9 @@ let select_start_with_person base get_field ini =
           (fun ini -> List.exists (fun name -> find name ini) names)
           ini
       in
-      if start_name then loop (i + 1) (ip :: list) (nb_res + 1)
-      else loop (i + 1) list nb_res
-    else list
-  in
-  loop 0 [] 0
+      if start_name then (get_iper p :: list)
+      else list
+  end [] (Gwdb.persons base)
 
 
 let select_start_with_auto_complete base mode max_res ini =
@@ -629,16 +613,14 @@ let select_all_auto_complete _ base get_field max_res ini =
   in
   let string_set = ref StrSetAutoComplete.empty in
   let nb_res = ref 0 in
-  for i = 0 to nb_of_persons base - 1 do
-    if !nb_res < max_res then
-      if List.for_all (fun s -> find (poi base (Adef.iper_of_int i)) s) ini
+  Gwdb.Collection.fold_until (fun () -> !nb_res < max_res) begin fun () p ->
+      if List.for_all (fun s -> find p s) ini
       then
         begin
-        let p = poi base (Adef.iper_of_int i) in
         string_set := StrSetAutoComplete.add (sou base (get_field p)) !string_set;
         incr nb_res;
         end
-  done;
+  end () (Gwdb.persons base) ;
   List.sort Gutil.alphabetic_order (StrSetAutoComplete.elements !string_set)
 
 
@@ -876,105 +858,6 @@ let search_auto_complete conf base mode place_mode max_res n =
         end
     end
 
-
-module IperSetLinkPerson =
-  Set.Make
-    (struct
-      type t = iper
-      let compare ip1 ip2 = compare (Adef.int_of_iper ip1) (Adef.int_of_iper ip2)
-     end)
-
-(*
-let select_both_link_person conf base ini_n ini_p =
-  let find_sn p x = kmp x (sou base (get_surname p)) in
-  let find_fn p x = kmp x (sou base (get_first_name p)) in
-  let find_str s x = kmp x s in
-  let ini_n = Util.name_key base ini_n in
-  let ini_n = code_varenv ini_n in
-  let ini_n =
-    let rec loop s acc =
-      if String.contains s '+' then
-        let index = String.index s '+' in
-        let start = index + 1 in
-        let len = String.length s - start in
-        let ns = String.sub s start len in
-        loop ns (decode_varenv (String.sub s 0 index) :: acc)
-      else (decode_varenv s :: acc)
-    in
-    loop ini_n []
-  in
-  let ini_n = List.filter (fun s -> s <> "") ini_n in
-  (* choper dans code varenv la variable qui dit que c'est + *)
-  let ini_p = code_varenv ini_p in
-  let ini_p =
-    let rec loop s acc =
-      if String.contains s '+' then
-        let index = String.index s '+' in
-        let start = index + 1 in
-        let len = String.length s - start in
-        let ns = String.sub s start len in
-        loop ns (decode_varenv (String.sub s 0 index) :: acc)
-      else (decode_varenv s :: acc)
-    in
-    loop ini_p []
-  in
-  let add_maiden p ini_p l =
-    let rec loop ifam_l l =
-      match ifam_l with
-      | [] -> ()
-      | ifam :: q ->
-          let fam = foi base ifam in
-          let ip = Gutil.spouse (get_key_index p) fam in
-          let sp = poi base ip in
-          if List.for_all (fun s -> find_fn sp s) ini_p then l := ip :: !l;
-          loop q l
-    in
-    if get_sex p = Male then
-      loop (Array.to_list (get_family p)) l
-  in
-  let add_maiden2 p ini_n ini_p l =
-    (* On sépare les noms avec tirets ... *)
-    let ini_n =
-      List.fold_left
-        (fun accu s -> (explode s '-') @ accu)
-        [] ini_n
-    in
-    let rec loop ifam_l l =
-      match ifam_l with
-      | [] -> ()
-      | ifam :: q ->
-          let fam = foi base ifam in
-          let ip = Gutil.spouse (get_key_index p) fam in
-          let sp = poi base ip in
-          let names =
-            sou base (get_surname p) ^ " " ^ sou base (get_surname sp)
-          in
-          if List.for_all (fun s -> find_str names s) ini_n then
-            add_maiden p ini_p l;
-          loop q l
-    in
-    if get_sex p = Male then
-      if List.exists (fun s -> find_sn p s) ini_n then
-        loop (Array.to_list (get_family p)) l
-  in
-  let list = ref [] in
-  for i = 0 to nb_of_persons base - 1 do
-    let ip = Adef.iper_of_int i in
-    let p = poi base ip in
-    if List.for_all (fun s -> find_sn p s) ini_n then
-      begin
-        if List.for_all (fun s -> find_fn p s) ini_p then
-          list := ip :: !list
-        else if maiden_name then add_maiden p ini_p list
-      end
-    else
-      (* On cherche une partie du nom de jeune fille dans les noms donnés. *)
-      if maiden_name then add_maiden2 p ini_n ini_p list
-  done;
-  !list
-*)
-
-
 let select_both_link_person base ini_n ini_p max_res =
   let find_sn p x = kmp x (sou base (get_surname p)) in
   let find_fn p x = kmp x (sou base (get_first_name p)) in
@@ -1007,18 +890,13 @@ let select_both_link_person base ini_n ini_p max_res =
     in
     loop ini_p []
   in
-  let rec loop i list nb_res =
-    if nb_res < max_res && i < nb_of_persons base then
-      let ip = Adef.iper_of_int i in
-      let p = poi base ip in
-      if List.for_all (fun s -> find_sn p s) ini_n then
-        if List.for_all (fun s -> find_fn p s) ini_p then
-          loop (i + 1) (Adef.iper_of_int i :: list) (nb_res + 1)
-        else loop (i + 1) list nb_res
-      else loop (i + 1) list nb_res
-    else list
-  in
-  loop 0 [] 0
+  fst @@ Gwdb.Collection.fold_until (fun (_, n) -> n < max_res) begin fun (list, n) p ->
+    if List.for_all (fun s -> find_sn p s) ini_n then
+      if List.for_all (fun s -> find_fn p s) ini_p then
+        (get_iper p :: list, n + 1)
+      else (list, n)
+    else (list, n)
+  end ([], 0) (Gwdb.persons base)
 
 let select_link_person base get_field max_res ini =
   let find p x = kmp x (sou base (get_field p)) in
@@ -1035,14 +913,11 @@ let select_link_person base get_field max_res ini =
     in
     loop ini []
   in
-  let rec loop i list nb_res =
-    if nb_res < max_res && i < nb_of_persons base then
-      if List.for_all (fun s -> find (poi base (Adef.iper_of_int i)) s) ini
-      then loop (i + 1) (Adef.iper_of_int i :: list) (nb_res + 1)
-      else loop (i + 1) list nb_res
-    else list
-  in
-  loop 0 [] 0
+  fst @@ Gwdb.Collection.fold_until (fun (_, n) -> n < max_res) begin fun (list, n) p ->
+      if List.for_all (fun s -> find p s) ini
+      then (get_iper p :: list, n + 1)
+      else (list, n)
+  end ([], 0) (Gwdb.persons base)
 
 let search_person_list base surname first_name =
   let _ = load_strings_array base in
@@ -1063,180 +938,5 @@ let search_person_list base surname first_name =
   | (None, Some fn) ->
       select_start_with_person base get_first_name fn
   | (None, None) -> []
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-(* ******************** SAVE ********************** *)
-(*
-let select_start_with_auto_complete conf base mode get_field max_res ini =
-  let need_whole_list = true in
-(*
-  let ini =
-    if is_surnames then Util.name_key base ini
-    else ini
-  in
-*)
-  let name =
-    match mode with
-    | `lastname -> persons_of_surname base
-    | `firstname -> persons_of_first_name base
-  in
-  let string_set = ref StrSetAutoComplete.empty in
-  (* Si la base est grosse, on fait un vrai start_with. *)
-  let () =
-    if nb_of_persons base > 100000 then
-    else
-      begin
-          let () =
-        (*    let start_k = Mutil.tr '_' ' ' ini in*)
-            (* On commence à ? comme ça on fait MAJ et MIN. *)
-            let start_k = Mutil.tr '_' ' ' "?" in
-            let letter = String.uppercase_ascii (String.sub start_k 0 1) in
-            match
-              try Some (spi_first name letter) with
-               Not_found -> None
-            with
-             | Some istr ->
-                let rec loop istr list =
-                  if StrSetAutoComplete.cardinal !string_set < max_res then
-                    begin
-                      let s = sou base istr in
-                      let k = Util.name_key base s in
-        (*              if (String.sub k 0 1) = letter then*)
-                        if string_incl_start_with (Name.lower ini) (Name.lower k) then
-                          begin
-                            string_set := StrSetAutoComplete.add (sou base istr) !string_set;
-        (*
-                          let () =
-                            if s <> "?" then
-                              let my_list = spi_find name istr in
-                              let () =
-                                List.iter
-                                  (fun ip ->
-                                    if is_patched_person base ip then
-                                      let p = poi base ip in
-                                      let isn = get_field p in
-                                      if eq_istr isn istr then
-                                        string_set := StrSetAutoComplete.add (sou base isn) !string_set
-                                      else ()
-                                    else string_set := StrSetAutoComplete.add (sou base istr) !string_set)
-                                  my_list
-                              in
-                              (*
-                              let my_list =
-                                if conf.use_restrict then
-                                  List.fold_left
-                                    (fun l ip ->
-                                      if is_restricted conf base ip then l
-                                      else (ip :: l) )
-                                    [] my_list
-                                else my_list
-                              in
-                              List.rev_append my_list list
-                              *)
-                              ()
-                            else ()
-                          in
-        *)
-                          match
-                            try Some (spi_next name istr need_whole_list) with
-                             Not_found -> None
-                          with
-                           | Some (istr, dlen) -> loop istr list
-                           | None -> ()
-                          end
-                        else
-                          match
-                            try Some (spi_next name istr need_whole_list) with
-                             Not_found -> None
-                          with
-                           | Some (istr, dlen) -> loop istr list
-                           | None -> ()
-        (*              else ()*)
-                    end
-                in loop istr []
-             | None -> ()
-          in
-        (*
-          let () =
-            let start_k = Mutil.tr '_' ' ' ini in
-            let letter = String.lowercase_ascii (String.sub start_k 0 1) in
-            match
-              try Some (spi_first name letter) with
-               Not_found -> None
-            with
-             | Some istr ->
-                let rec loop istr list =
-                  if StrSetAutoComplete.cardinal !string_set < max_res then
-                    begin
-                      let s = sou base istr in
-                      let k = Util.name_key base s in
-        (*              if (String.sub k 0 1) = letter then*)
-                        if string_incl_start_with (Name.lower ini) (Name.lower k) then
-                          let () =
-                            if s <> "?" then
-                              let my_list = spi_find name istr in
-                              let () =
-                                List.iter
-                                  (fun ip ->
-                                    if is_patched_person base ip then
-                                      let p = poi base ip in
-                                      let isn = get_field p in
-                                      if eq_istr isn istr then
-                                        string_set := StrSetAutoComplete.add (sou base isn) !string_set
-                                      else ()
-                                    else string_set := StrSetAutoComplete.add (sou base istr) !string_set)
-                                  my_list
-                              in
-                              (*
-                              let my_list =
-                                if conf.use_restrict then
-                                  List.fold_left
-                                    (fun l ip ->
-                                      if is_restricted conf base ip then l
-                                      else (ip :: l) )
-                                    [] my_list
-                                else my_list
-                              in
-                              List.rev_append my_list list
-                              *)
-                              ()
-                            else ()
-                          in
-                          match
-                            try Some (spi_next name istr need_whole_list) with
-                              Not_found -> None
-                          with
-                           | Some (istr, dlen) -> loop istr list
-                           | None -> ()
-                        else
-                          match
-                            try Some (spi_next name istr need_whole_list) with
-                              Not_found -> None
-                          with
-                           | Some (istr, dlen) -> loop istr list
-                           | None -> ()
-        (*              else ()*)
-                    end
-                in loop istr []
-             | None -> ()
-          in
-        *)
-      end
-  in
-  List.sort Gutil.alphabetic_order (StrSetAutoComplete.elements !string_set)
-*)
 
 #endif

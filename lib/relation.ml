@@ -224,13 +224,13 @@ let next_relation_link_txt conf ip1 ip2 excl_faml =
     List.fold_left
       (fun (sl, i) ifam ->
          "&ef" :: string_of_int i :: "=" ::
-         string_of_int (Adef.int_of_ifam ifam) :: sl,
+         string_of_ifam ifam :: sl,
          i - 1)
       ([], List.length excl_faml - 1) excl_faml
   in
   let sl =
-    commd conf :: "em=R&ei=" :: string_of_int (Adef.int_of_iper ip1) ::
-    "&i=" :: string_of_int (Adef.int_of_iper ip2) ::
+    commd conf :: "em=R&ei=" :: string_of_iper ip1 ::
+    "&i=" :: string_of_iper ip2 ::
     (if p_getenv conf.env "spouse" = Some "on" then "&spouse=on" else "") ::
     (if conf.cancel_links then "&cgl=on" else "") :: bd :: color :: "&et=S" ::
     sl
@@ -257,76 +257,70 @@ type node =
     NotVisited
   | Visited of (bool * iper * famlink)
 
-let get_shortest_path_relation conf base ip1 ip2 excl_faml =
-  let mark_per = Array.make (nb_of_persons base) NotVisited in
-  let mark_fam = Array.make (nb_of_families base) false in
+(* FIXME: remove all these Aray.to_list *)
+let get_shortest_path_relation conf base ip1 ip2 (excl_faml : ifam list) =
+  let mark_per = Gwdb.iper_marker (Gwdb.ipers base) NotVisited in
+  let mark_fam = Gwdb.ifam_marker (Gwdb.ifams base) false in
   List.iter
-    (fun i ->
-       let i = Adef.int_of_ifam i in
-       if i < Array.length mark_fam then mark_fam.(i) <- true)
+    (fun i -> Gwdb.Marker.set mark_fam i true)
     excl_faml;
   let parse_fam ifam =
-    if mark_fam.(Adef.int_of_ifam ifam) then []
+    if Gwdb.Marker.get mark_fam ifam then []
     else
       let fam = foi base ifam in
-      mark_fam.(Adef.int_of_ifam ifam) <- true;
+      Gwdb.Marker.set mark_fam ifam true;
       let result =
-        [get_father fam, Parent, ifam; get_mother fam, Parent, ifam]
-      in
-      let result =
-        result @
-        List.fold_right
-          (fun child children -> (child, Sibling, ifam) :: children)
-          (Array.to_list (get_children (foi base ifam))) []
-      in
-      let result =
-        result @
-        List.fold_right
+        Array.fold_right
           (fun fam children ->
              if ifam = fam then children
-             else if mark_fam.(Adef.int_of_ifam fam) then children
+             else if Gwdb.Marker.get mark_fam fam then children
              else
-               List.fold_right
+               Array.fold_right
                  (fun child children -> (child, HalfSibling, fam) :: children)
-                 (Array.to_list (get_children (foi base fam))) children)
-          (Array.to_list (get_family (pget conf base (get_father fam)))) []
+                 (get_children (foi base fam)) children)
+          (get_family (pget conf base (get_mother fam))) []
       in
-      result @
-      List.fold_right
-        (fun fam children ->
-           if ifam = fam then children
-           else if mark_fam.(Adef.int_of_ifam fam) then children
-           else
-             List.fold_right
-               (fun child children -> (child, HalfSibling, fam) :: children)
-               (Array.to_list (get_children (foi base fam))) children)
-        (Array.to_list (get_family (pget conf base (get_mother fam)))) []
+      let result =
+        Array.fold_right
+          (fun fam children ->
+             if ifam = fam then children
+             else if Gwdb.Marker.get mark_fam fam then children
+             else
+               Array.fold_right
+                 (fun child children -> (child, HalfSibling, fam) :: children)
+                 (get_children (foi base fam)) children)
+          (get_family (pget conf base (get_father fam))) result
+      in
+      let result =
+        Array.fold_right
+          (fun child children -> (child, Sibling, ifam) :: children)
+          (get_children (foi base ifam))
+          result
+      in
+      (get_father fam, Parent, ifam)
+      :: (get_mother fam, Parent, ifam)
+      :: result
   in
   let neighbours iper =
-    let result =
-      List.fold_right
-        (fun ifam nb ->
-           if mark_fam.(Adef.int_of_ifam ifam) then nb
-           else
-             let fam = foi base ifam in
-             mark_fam.(Adef.int_of_ifam ifam) <- true;
-             List.fold_right
-               (fun child children -> (child, Child, ifam) :: children)
-               (Array.to_list (get_children fam))
-               [get_father fam, Mate, ifam; get_mother fam, Mate, ifam] @
-             nb)
-        (Array.to_list (get_family (pget conf base iper))) []
-    in
-    result @
-    (match get_parents (pget conf base iper) with
-       Some ifam -> parse_fam ifam
-     | _ -> [])
+    Array.fold_right
+      (fun ifam nb ->
+         if Gwdb.Marker.get mark_fam ifam then nb
+         else
+           let fam = foi base ifam in
+           Gwdb.Marker.set mark_fam ifam true;
+           Array.fold_right
+             (fun child children -> (child, Child, ifam) :: children)
+             (get_children fam)
+             [get_father fam, Mate, ifam; get_mother fam, Mate, ifam] @
+           nb)
+      (get_family (pget conf base iper))
+      (Opt.map_default [] parse_fam (get_parents (pget conf base iper) ) )
   in
   let rec make_path path vertex =
     match List.hd path with
     | _, Self -> path
     | _, _ ->
-        match mark_per.(Adef.int_of_iper vertex) with
+        match Gwdb.Marker.get mark_per vertex with
           NotVisited -> assert false
         | Visited (_, v, f) -> make_path ((vertex, f) :: path) v
   in
@@ -350,10 +344,9 @@ let get_shortest_path_relation conf base ip1 ip2 excl_faml =
           let rec loop2 result =
             function
               (iper, fl, ifam) :: neighbourslist ->
-                begin match mark_per.(Adef.int_of_iper iper) with
+                begin match Gwdb.Marker.get mark_per iper with
                   NotVisited ->
-                    mark_per.(Adef.int_of_iper iper) <-
-                      Visited (source, vertex, fl);
+                    Gwdb.Marker.set mark_per iper (Visited (source, vertex, fl));
                     loop2 (iper :: result) neighbourslist
                 | Visited (s, v, f) ->
                     if s = source then loop2 result neighbourslist
@@ -385,13 +378,13 @@ let get_shortest_path_relation conf base ip1 ip2 excl_faml =
         Left (path, ifam) -> Some (path, ifam)
       | Right queue1 -> width_search queue1 visited1 queue2 visited2
   in
-  mark_per.(Adef.int_of_iper ip1) <- Visited (true, ip1, Self);
-  mark_per.(Adef.int_of_iper ip2) <- Visited (false, ip2, Self);
+  Gwdb.Marker.set mark_per ip1 @@ Visited (true, ip1, Self);
+  Gwdb.Marker.set mark_per ip2 @@ Visited (false, ip2, Self);
   width_search [ip1] 0 [ip2] 0
 
 let print_shortest_path conf base p1 p2 =
-  let ip1 = get_key_index p1 in
-  let ip2 = get_key_index p2 in
+  let ip1 = get_iper p1 in
+  let ip2 = get_iper p2 in
   if ip1 = ip2 then
     let title _ =
       Wserver.printf "%s" (capitale (transl conf "relationship"))
@@ -402,8 +395,8 @@ let print_shortest_path conf base p1 p2 =
   else
     let excl_faml =
       let rec loop list i =
-        match p_getint conf.env ("ef" ^ string_of_int i) with
-          Some k -> loop (Adef.ifam_of_int k :: list) (i + 1)
+        match p_getenv conf.env ("ef" ^ string_of_int i) with
+          Some k -> loop (ifam_of_string k :: list) (i + 1)
         | None ->
             match find_person_in_env conf base ("ef" ^ string_of_int i) with
               Some p ->
@@ -493,7 +486,7 @@ let get_piece_of_branch conf base (((reltab, list), x), proj) (len1, len2) =
   let rec loop ip dist =
     if dist <= len1 then []
     else
-      let lens = proj reltab.(Adef.int_of_iper ip) in
+      let lens = proj @@ Gwdb.Marker.get reltab ip in
       let rec loop1 =
         function
           ifam :: ifaml ->
@@ -512,7 +505,7 @@ let get_piece_of_branch conf base (((reltab, list), x), proj) (len1, len2) =
       in
       loop1 (Array.to_list (get_family (pget conf base ip)))
   in
-  loop (get_key_index anc) x
+  loop (get_iper anc) x
 
 let parents_label conf base info =
   function
@@ -691,8 +684,8 @@ let nephew_label conf x p =
         (transl_nth conf "nth (generation)" n)
 
 let same_parents conf base p1 p2 =
-  get_parents (pget conf base (get_key_index p1)) =
-    get_parents (pget conf base (get_key_index p2))
+  get_parents (pget conf base (get_iper p1)) =
+    get_parents (pget conf base (get_iper p2))
 
 let print_link_name conf base n p1 p2 sol =
   let (pp1, pp2, (x1, x2, list), reltab) = sol in
@@ -787,10 +780,6 @@ let print_link_name conf base n p1 p2 sol =
     else transl_a_of_gr_eq_gen_lev conf s1 s2 s2
   in
   Wserver.printf "%s.\n" (Util.translate_eval s)
-
-let wprint_num conf n =
-  Sosa.print (fun x -> Wserver.printf "%s" x)
-    (transl conf "(thousand separator)") n
 
 let string_of_big_int conf i =
   let sep = transl conf "(thousand separator)" in
@@ -954,13 +943,13 @@ let print_dag_links conf base p1 p2 rl =
          List.fold_left
            (fun anc_map (p, n) ->
               let (pp1, pp2, nn, nt, maxlev) =
-                try M.find (get_key_index p) anc_map with
+                try M.find (get_iper p) anc_map with
                   Not_found -> pp1, pp2, 0, 0, 0
               in
               if nn >= max_br then anc_map
               else
                 let v = pp1, pp2, nn + n, nt + 1, max maxlev (max x1 x2) in
-                M.add (get_key_index p) v anc_map)
+                M.add (get_iper p) v anc_map)
            anc_map list)
       M.empty rl
   in
@@ -1011,7 +1000,7 @@ let print_dag_links conf base p1 p2 rl =
                (fun (l1, l2) (_, _, (x1, x2, list), _) ->
                   List.fold_left
                     (fun (l1, l2) (a, _) ->
-                       if get_key_index a = ip then
+                       if get_iper a = ip then
                          let l1 = if List.mem x1 l1 then l1 else x1 :: l1 in
                          let l2 = if List.mem x2 l2 then l2 else x2 :: l2 in
                          l1, l2
@@ -1099,7 +1088,7 @@ let compute_simple_relationship conf base tstab ip1 ip2 =
       try
         List.fold_left
           (fun n i ->
-             let u = tab.Consang.reltab.(i) in
+             let u = Gwdb.Marker.get tab.Consang.reltab i in
              List.fold_left
                (fun n (_, n1, _) ->
                   let n1 = if n1 < 0 then raise Exit else Sosa.of_int n1 in
@@ -1113,8 +1102,8 @@ let compute_simple_relationship conf base tstab ip1 ip2 =
     let rl =
       List.fold_left
         (fun rl i ->
-           let u = tab.Consang.reltab.(i) in
-           let p = pget conf base (Adef.iper_of_int i) in
+           let u = Gwdb.Marker.get tab.Consang.reltab i in
+           let p = pget conf base i in
            List.fold_left
              (fun rl (len1, n1, _) ->
                 List.fold_left
@@ -1147,16 +1136,16 @@ let compute_simple_relationship conf base tstab ip1 ip2 =
 
 let known_spouses_list conf base p excl_p =
   let u = p in
-  List.fold_left
+  Array.fold_left
     (fun spl ifam ->
-       let sp = pget conf base (Gutil.spouse (get_key_index p) (foi base ifam)) in
+       let sp = pget conf base (Gutil.spouse (get_iper p) (foi base ifam)) in
        if sou base (get_first_name sp) <> "?" &&
           sou base (get_surname sp) <> "?" &&
-          get_key_index sp <> get_key_index excl_p
+          get_iper sp <> get_iper excl_p
        then
          sp :: spl
        else spl)
-    [] (Array.to_list (get_family u))
+    [] (get_family u)
 
 let merge_relations rl1 rl2 =
   List.merge
@@ -1178,8 +1167,8 @@ let combine_relationship conf base tstab pl1 pl2 f_sp1 f_sp2 sl =
        List.fold_right
          (fun p2 sl ->
             let sol =
-              compute_simple_relationship conf base tstab (get_key_index p1)
-                (get_key_index p2)
+              compute_simple_relationship conf base tstab (get_iper p1)
+                (get_iper p2)
             in
             match sol with
               Some (rl, total, _, reltab) ->
@@ -1193,8 +1182,8 @@ let sp p = Some p
 let no_sp _ = None
 
 let compute_relationship conf base by_marr p1 p2 =
-  let ip1 = get_key_index p1 in
-  let ip2 = get_key_index p2 in
+  let ip1 = get_iper p1 in
+  let ip2 = get_iper p2 in
   if ip1 = ip2 then None
   else
     let tstab = Util.create_topological_sort conf base in
@@ -1239,7 +1228,7 @@ let compute_relationship conf base by_marr p1 p2 =
     if sl = [] then None else Some (sl, total, rel)
 
 let print_one_path conf base found a p1 p2 pp1 pp2 l1 l2 =
-  let ip = get_key_index a in
+  let ip = get_iper a in
   let sp1 =
     match pp1 with
       Some _ -> Some p1
@@ -1260,8 +1249,8 @@ let print_one_path conf base found a p1 p2 pp1 pp2 l1 l2 =
       Some p2 -> p2
     | _ -> p2
   in
-  let ip1 = get_key_index p1 in
-  let ip2 = get_key_index p2 in
+  let ip1 = get_iper p1 in
+  let ip2 = get_iper p2 in
   let dist = RelationLink.make_dist_tab conf base ip (max l1 l2 + 1) in
   let b1 = RelationLink.find_first_branch conf base dist ip l1 ip1 Neuter in
   let b2 = RelationLink.find_first_branch conf base dist ip l2 ip2 Neuter in
@@ -1323,9 +1312,8 @@ let print_main_relationship conf base long p1 p2 rel =
     if Sosa.eq total Sosa.zero then ()
     else
       begin
-        Wserver.printf " (";
-        wprint_num conf total;
-        Wserver.printf " %s)"
+        Wserver.printf " (%s %s)"
+          (Sosa.to_string_sep (transl conf "(thousand separator)") total)
           (transl_nth conf "relationship link/relationship links"
              (if Sosa.eq total Sosa.one then 0 else 1))
       end
@@ -1363,7 +1351,7 @@ let print_main_relationship conf base long p1 p2 rel =
   end;
   begin match rel with
     None ->
-      if get_key_index p1 = get_key_index p2 then
+      if get_iper p1 = get_iper p2 then
         Wserver.printf "%s\n"
           (capitale (transl conf "it is the same person!"))
       else
@@ -1443,13 +1431,13 @@ let multi_relation_next_txt conf pl2 lim assoc_txt =
           (fun (sl, n) p ->
              let sl =
                try
-                 let t = Hashtbl.find assoc_txt (get_key_index p) in
+                 let t = Hashtbl.find assoc_txt (get_iper p) in
                  "&t" :: string_of_int n :: "=" :: t :: sl
                with Not_found -> sl
              in
              let sl =
                "&i" :: string_of_int n :: "=" ::
-               string_of_int (Adef.int_of_iper (get_key_index p)) :: sl
+               string_of_iper (get_iper p) :: sl
              in
              sl, n - 1)
           (sl, List.length pl2) (List.rev pl2)
@@ -1487,8 +1475,8 @@ let print_multi_relation conf base pl lim assoc_txt =
     let rec loop path =
       function
         p1 :: (p2 :: _ as pl) ->
-          let ip1 = get_key_index p1 in
-          let ip2 = get_key_index p2 in
+          let ip1 = get_iper p1 in
+          let ip2 = get_iper p2 in
           begin match get_shortest_path_relation conf base ip1 ip2 [] with
             Some (path1, _) ->
               let path =
@@ -1512,7 +1500,7 @@ let print_multi_relation conf base pl lim assoc_txt =
       Dag.Item
         (p,
          (try
-            let t = Hashtbl.find assoc_txt (get_key_index p) in
+            let t = Hashtbl.find assoc_txt (get_iper p) in
             "<b>(" ^ t ^ ")</b>"
           with Not_found -> ""))
     in
@@ -1560,7 +1548,7 @@ let print_multi conf base =
       match find_person_in_env conf base k with
         Some p ->
           begin match p_getenv conf.env ("t" ^ k) with
-            Some x -> Hashtbl.add assoc_txt (get_key_index p) x
+            Some x -> Hashtbl.add assoc_txt (get_iper p) x
           | None -> ()
           end;
           loop (p :: pl) (i + 1)

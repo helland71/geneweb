@@ -260,9 +260,9 @@ let format_stats_m_f2 l1 l2 title series1 series2 =
       l2
   in
   let datas =
-    List.map
+    Mutil.array_to_list_map
       (fun s -> Mstats.Data_l.({data = Array.to_list s;}))
-      (Array.to_list data)
+      data
   in
   let labels = List.map Int32.of_int labels in
   Mstats.Stat.({
@@ -311,9 +311,9 @@ let format_stats_dmy l title series =
   in
   let () = loop 0 labels in
   let datas =
-    List.map
+    Mutil.array_to_list_map
       (fun s -> Mstats.Data_l.({data = Array.to_list s;}))
-      (Array.to_list data)
+      data
   in
   let labels = List.map Int32.of_int labels in
   Mstats.Stat.({
@@ -817,7 +817,6 @@ let print_ind_stats conf base =
   let params =
     get_params conf (fun a b -> Mext_stats.parse_stats_params a b)
   in
-  let nb_pers = nb_of_persons base in
 
   (* nombre d'ascendants *)
   let (ancestors, stats_ancestors) =
@@ -842,9 +841,9 @@ let print_ind_stats conf base =
     in
     match params.Mstats.Stats_params.i with
     | Some i ->
-        let ip = Adef.iper_of_int (Int32.to_int i) in
+        let ip = Gwdb.iper_of_string @@ Int32.to_string i in
         let ancestors = loop 0 [ip] [] in
-        let mark = Array.make nb_pers false in
+        let mark = Gwdb.iper_marker (Gwdb.ipers base) false in
         let (datas_found, datas_diss) =
           List.fold_left
             (fun (datas_found, datas_diss) l ->
@@ -852,8 +851,8 @@ let print_ind_stats conf base =
               let diss =
                 List.fold_left
                   (fun accu ip ->
-                    if mark.(Adef.int_of_iper ip) then accu
-                    else begin mark.(Adef.int_of_iper ip) <- true; succ accu end)
+                    if Gwdb.Marker.get mark ip then accu
+                    else begin Gwdb.Marker.set mark ip true; succ accu end)
                   0 l
               in
               let data_found =
@@ -921,20 +920,19 @@ let print_ind_stats conf base =
               List.fold_left
                 (fun accu ip ->
                   let p = poi base ip in
-                  List.fold_left
+                  Array.fold_left
                     (fun accu ifam ->
-                      let fam = foi base ifam in
-                      Array.to_list (get_children fam) @ accu)
-                    accu (Array.to_list (get_family p)))
+                       Array.fold_right List.cons (get_children @@ foi base ifam) accu)
+                    accu (get_family p))
                 [] ipl
             in
             loop (gen + 1) next_gen (ipl :: accu)
     in
     match params.Mstats.Stats_params.i with
     | Some i ->
-        let ip = Adef.iper_of_int (Int32.to_int i) in
+        let ip = Gwdb.iper_of_string @@ Int32.to_string i in
         let descendants = loop 0 [ip] [] in
-        let mark = Array.make nb_pers false in
+        let mark = Gwdb.iper_marker (Gwdb.ipers base) false in
         let (datas_found, datas_diss) =
           List.fold_left
             (fun (datas_found, datas_diss) l ->
@@ -942,8 +940,8 @@ let print_ind_stats conf base =
               let diss =
                 List.fold_left
                   (fun accu ip ->
-                    if mark.(Adef.int_of_iper ip) then accu
-                    else begin mark.(Adef.int_of_iper ip) <- true; succ accu end)
+                    if Gwdb.Marker.get mark ip then accu
+                    else begin Gwdb.Marker.set mark ip true; succ accu end)
                   0 l
               in
               let data_found =
@@ -996,16 +994,16 @@ let print_ind_stats conf base =
 
   (* répartition homme femme sur la descendance *)
   let stats_descendants_m_f =
-    let mark = Array.make nb_pers false in
+    let mark = Gwdb.iper_marker (Gwdb.ipers base) false in
     let (nb_male, nb_female) =
       List.fold_left
         (fun (nb_male, nb_female) l ->
           List.fold_left
             (fun (nb_male, nb_female) ip ->
-              if mark.(Adef.int_of_iper ip) then (nb_male, nb_female)
+              if Gwdb.Marker.get mark ip then (nb_male, nb_female)
               else
                 begin
-                  mark.(Adef.int_of_iper ip) <- true;
+                  Gwdb.Marker.set mark ip true;
                   let p = poi base ip in
                   match get_sex p with
                   | Male -> (nb_male + 1, nb_female)
@@ -1264,11 +1262,10 @@ let print_all_stats conf base =
   let ht_young_dad = Hashtbl.create nb_pers in
   let ht_young_mom = Hashtbl.create nb_pers in
 
-  for i = 0 to nb_pers - 1 do
-    let ip = Adef.iper_of_int i in
-    let p = poi base ip in
+  Gwdb.Collection.iter begin fun p ->
     let p_auth = Util.authorized_age conf base p in
     let faml = Array.to_list (get_family p) in
+    let ip = get_iper p in
 
     if get_sex p = Neuter then ()
     else
@@ -1279,7 +1276,7 @@ let print_all_stats conf base =
             begin
               (* plus vieux *)
               if p_auth && d1 <> d2 then
-                let a = CheckItem.time_elapsed dmy1 dmy2 in
+                let a = Date.time_elapsed dmy1 dmy2 in
                 let r =
                   { s_year = dmy2.year - (dmy2.year mod periode);
                     s_sex = get_sex p;
@@ -1472,7 +1469,7 @@ let print_all_stats conf base =
                       let m_auth =
                         p_auth &&
                           Util.authorized_age conf base
-                          (poi base (Gutil.spouse (get_key_index p) fam))
+                          (poi base (Gutil.spouse (get_iper p) fam))
                       in
                       if not m_auth then ()
                       else
@@ -1487,7 +1484,7 @@ let print_all_stats conf base =
                                         if dmy2.year < dmy.year then ()
                                         else
                                           begin
-                                            let a = CheckItem.time_elapsed dmy dmy2 in
+                                            let a = Date.time_elapsed dmy dmy2 in
                                             let v = a.year in
                                             let r =
                                               { s_year = dmy.year - (dmy.year mod periode);
@@ -1519,7 +1516,7 @@ let print_all_stats conf base =
                                               else
                                                 begin
                                                   if dmyf.year < dmym.year then
-                                                    let a = CheckItem.time_elapsed dmy dmyf in
+                                                    let a = Date.time_elapsed dmy dmyf in
                                                     begin
                                                       let v = a.year in
                                                       let r =
@@ -1533,7 +1530,7 @@ let print_all_stats conf base =
                                                       with Not_found -> Hashtbl.add ht_marr_time r.s_year [r]
                                                     end
                                                   else
-                                                    let a = CheckItem.time_elapsed dmy dmym in
+                                                    let a = Date.time_elapsed dmy dmym in
                                                     begin
                                                       let v = a.year in
                                                       let r =
@@ -1551,7 +1548,7 @@ let print_all_stats conf base =
                                                 if dmyf.year < dmy.year then ()
                                                 else
                                                   begin
-                                                    let a = CheckItem.time_elapsed dmy dmyf in
+                                                    let a = Date.time_elapsed dmy dmyf in
                                                     let v = a.year in
                                                     let r =
                                                       { s_year = dmy.year - (dmy.year mod periode);
@@ -1567,7 +1564,7 @@ let print_all_stats conf base =
                                                 if dmym.year > dmy.year then ()
                                                 else
                                                   begin
-                                                    let a = CheckItem.time_elapsed dmy dmym in
+                                                    let a = Date.time_elapsed dmy dmym in
                                                     let v = a.year in
                                                     let r =
                                                       { s_year = dmy.year - (dmy.year mod periode);
@@ -1590,7 +1587,7 @@ let print_all_stats conf base =
                                               if dmy.year > dmy2.year then ()
                                               else
                                                 begin
-                                                  let a = CheckItem.time_elapsed dmy dmy2 in
+                                                  let a = Date.time_elapsed dmy dmy2 in
                                                   let v = a.year in
                                                   let r =
                                                     { s_year = dmy.year - (dmy.year mod periode);
@@ -1662,7 +1659,7 @@ let print_all_stats conf base =
                                 match Date.get_birth_death_date c with
                                 | (Some (Dgreg (({prec = Sure | About | Maybe} as dmy2), _)), _, _) ->
                                     begin
-                                      let a = CheckItem.time_elapsed dmy1 dmy2 in
+                                      let a = Date.time_elapsed dmy1 dmy2 in
                                       try
                                         let n = Hashtbl.find ht ip in
                                         if n > a.year then Hashtbl.replace ht ip a.year
@@ -1680,14 +1677,11 @@ let print_all_stats conf base =
             end;
         | _ -> ()
       end;
-  done;
+  end
+    (Gwdb.persons base) ;
 
-  for i = 0 to nb_fam - 1 do
-    let ifam = Adef.ifam_of_int i in
-    let fam = foi base ifam in
-    if is_deleted_family fam then ()
-    else
-      begin
+  Gwdb.Collection.iter begin fun fam ->
+    let ifam = get_ifam fam in
         let m_auth =
           let father = poi base (get_father fam) in
           let mother = poi base (get_mother fam) in
@@ -1713,7 +1707,7 @@ let print_all_stats conf base =
                       begin
                         if dmy1.day = 0 then ()
                         else
-                        let a1 = CheckItem.time_elapsed dmy1 dmy in
+                        let a1 = Date.time_elapsed dmy1 dmy in
                         let r1 =
                           { s_year = dmy1.year - (dmy1.year mod periode);
                             s_sex = get_sex p;
@@ -1727,7 +1721,7 @@ let print_all_stats conf base =
                       begin
                         if dmy2.day = 0 then ()
                         else
-                        let a2 = CheckItem.time_elapsed dmy2 dmy in
+                        let a2 = Date.time_elapsed dmy2 dmy in
                         let r2 =
                           { s_year = dmy2.year - (dmy2.year mod periode);
                             s_sex = get_sex sp;
@@ -1816,8 +1810,8 @@ let print_all_stats conf base =
                      (Some (Dgreg (({prec = Sure} as dmy2), _)), _, _)) ->
                       if dmy1.day > 0 && dmy2.day > 0 then
                         let a =
-                          if dmy1.year < dmy2.year then CheckItem.time_elapsed dmy1 dmy2
-                          else CheckItem.time_elapsed dmy2 dmy2
+                          if dmy1.year < dmy2.year then Date.time_elapsed dmy1 dmy2
+                          else Date.time_elapsed dmy2 dmy2
                         in
                         let v = a.month + 12 * a.year in
                         begin
@@ -1895,7 +1889,7 @@ let print_all_stats conf base =
                           with
                           | ((Some (Dgreg (({prec = Sure} as dmy_c1), _)), _, _) ,
                              (Some (Dgreg (({prec = Sure} as dmy_c2), _)), _, _)) ->
-                              let a = CheckItem.time_elapsed dmy_c1 dmy_c2 in
+                              let a = Date.time_elapsed dmy_c1 dmy_c2 in
                               begin
                                 let v = a.month + 12 * a.year in
                                 let r =
@@ -1928,7 +1922,7 @@ let print_all_stats conf base =
                           begin
                             match Date.get_birth_death_date p with
                             | (Some (Dgreg (({prec = Sure} as dmy_p), _)), _, _) ->
-                                let a = CheckItem.time_elapsed dmy_p dmy_c in
+                                let a = Date.time_elapsed dmy_p dmy_c in
                                 let v = a.year in
                                 begin
                                   let r1 =
@@ -1946,7 +1940,7 @@ let print_all_stats conf base =
                           begin
                             match Date.get_birth_death_date sp with
                             | (Some (Dgreg (({prec = Sure} as dmy_p), _)), _, _) ->
-                                let a = CheckItem.time_elapsed dmy_p dmy_c in
+                                let a = Date.time_elapsed dmy_p dmy_c in
                                 let v = a.year in
                                 begin
                                   let r2 =
@@ -1979,7 +1973,7 @@ let print_all_stats conf base =
                           begin
                             match Date.get_birth_death_date p with
                             | (Some (Dgreg (({prec = Sure} as dmy_p), _)), _, _) ->
-                                let a = CheckItem.time_elapsed dmy_p dmy_c in
+                                let a = Date.time_elapsed dmy_p dmy_c in
                                 let v = a.year in
                                 begin
                                   let r1 =
@@ -1997,7 +1991,7 @@ let print_all_stats conf base =
                           begin
                             match Date.get_birth_death_date sp with
                             | (Some (Dgreg (({prec = Sure} as dmy_p), _)), _, _) ->
-                                let a = CheckItem.time_elapsed dmy_p dmy_c in
+                                let a = Date.time_elapsed dmy_p dmy_c in
                                 let v = a.year in
                                 begin
                                   let r2 =
@@ -2029,7 +2023,7 @@ let print_all_stats conf base =
                           begin
                             match Date.get_birth_death_date p with
                             | (Some (Dgreg (({prec = Sure} as dmy_p), _)), _, _) ->
-                                let a = CheckItem.time_elapsed dmy_p dmy_c in
+                                let a = Date.time_elapsed dmy_p dmy_c in
                                 let v = a.year in
                                 begin
                                   let r1 =
@@ -2047,7 +2041,7 @@ let print_all_stats conf base =
                           begin
                             match Date.get_birth_death_date sp with
                             | (Some (Dgreg (({prec = Sure} as dmy_p), _)), _, _) ->
-                                let a = CheckItem.time_elapsed dmy_p dmy_c in
+                                let a = Date.time_elapsed dmy_p dmy_c in
                                 let v = a.year in
                                 begin
                                   let r2 =
@@ -2086,7 +2080,7 @@ let print_all_stats conf base =
                           with
                           | ((Some (Dgreg (({prec = Sure} as dmy1), _)), _, _),
                              (Some (Dgreg (({prec = Sure} as dmy2), _)), _, _)) ->
-                                let a = CheckItem.time_elapsed dmy1 dmy2 in
+                                let a = Date.time_elapsed dmy1 dmy2 in
                                 let v = a.month + 12 * a.year in
                                 begin
                                   let r =
@@ -2113,7 +2107,7 @@ let print_all_stats conf base =
             end
         | _ -> ()
       end
-  done;
+        (Gwdb.families base);
 
   (* Nom le plus long *)
   let _longuest_name =

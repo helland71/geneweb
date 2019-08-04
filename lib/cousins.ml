@@ -24,14 +24,14 @@ let rec except x =
   | y :: l -> if x = y then l else y :: except x l
 
 let children_of base u =
-  List.fold_right
+  Array.fold_right
     (fun ifam list ->
-       let des = foi base ifam in Array.to_list (get_children des) @ list)
-    (Array.to_list (get_family u)) []
+       let des = foi base ifam in
+       Array.fold_right List.cons (get_children des) list)
+    (get_family u) []
 
 let children_of_fam base ifam =
-  let des = foi base ifam in
-  Array.to_list (get_children des)
+  Array.to_list (get_children @@ foi base ifam)
 
 let siblings_by conf base iparent ip =
   let list = children_of base (pget conf base iparent) in except ip list
@@ -66,13 +66,13 @@ let siblings conf base ip =
 let rec has_desc_lev conf base lev u =
   if lev <= 1 then true
   else
-    List.exists
+    Array.exists
       (fun ifam ->
          let des = foi base ifam in
-         List.exists
+         Array.exists
            (fun ip -> has_desc_lev conf base (lev - 1) (pget conf base ip))
-           (Array.to_list (get_children des)))
-      (Array.to_list (get_family u))
+           (get_children des))
+      (get_family u)
 
 let br_inter_is_empty b1 b2 =
   List.for_all (fun (ip, _) -> not (List.mem_assoc ip b2)) b1
@@ -87,9 +87,9 @@ let give_access conf base ia_asex p1 b1 p2 b2 =
     if is_hidden p then s
     else
       "<a href=\"" ^ commd conf ^ "m=RL&" ^ acces_n conf base "1" p1 ^
-      "&b1=" ^ Sosa.to_string (Util.sosa_of_branch (ia_asex :: b1)) ^ "&" ^
+      "&b1=" ^ Sosa.to_string (Util.old_sosa_of_branch conf base (ia_asex :: b1)) ^ "&" ^
       acces_n conf base "2" p2 ^ "&b2=" ^
-      Sosa.to_string (Util.sosa_of_branch (ia_asex :: b2)) ^ "&spouse=" ^
+      Sosa.to_string (Util.old_sosa_of_branch conf base (ia_asex :: b2)) ^ "&spouse=" ^
       (if p_getenv conf.env "spouse" = Some "on" then "on" else "") ^
       "&image=" ^
       (if p_getenv conf.env "image" = Some "off" then "off" else "") ^ "&bd=" ^
@@ -102,9 +102,9 @@ let give_access conf base ia_asex p1 b1 p2 b2 =
     if is_hidden p then s
     else
       "<a href=\"" ^ commd conf ^ "m=RL&" ^ acces_n conf base "1" p1 ^
-      "&b1=" ^ Sosa.to_string (Util.sosa_of_branch (ia_asex :: b1)) ^ "&" ^
+      "&b1=" ^ Sosa.to_string (Util.old_sosa_of_branch conf base (ia_asex :: b1)) ^ "&" ^
       acces_n conf base "2" p2 ^ "&b2=" ^
-      Sosa.to_string (Util.sosa_of_branch (ia_asex :: b2)) ^ "&" ^
+      Sosa.to_string (Util.old_sosa_of_branch conf base (ia_asex :: b2)) ^ "&" ^
       acces_n conf base "4" p3 ^ "&spouse=" ^
       (if p_getenv conf.env "spouse" = Some "on" then "on" else "") ^
       "&image=" ^
@@ -118,7 +118,7 @@ let give_access conf base ia_asex p1 b1 p2 b2 =
     Perso.print_sosa conf base p2 true;
     Wserver.printf "%s%s"
       (gen_person_title_text reference std_access conf base p2)
-      (Date.short_dates_text conf base p2)
+      (DateDisplay.short_dates_text conf base p2)
   in
   let print_spouse sp first =
     incr cnt_sp;
@@ -129,34 +129,27 @@ let give_access conf base ia_asex p1 b1 p2 b2 =
           (gen_person_title_text reference std_access conf base p2)
       end
     else Wserver.printf "<br%s>%s" conf.xhs (person_title_text conf base p2);
-    Wserver.printf "%s &amp; " (Date.short_dates_text conf base p2);
+    Wserver.printf "%s &amp; " (DateDisplay.short_dates_text conf base p2);
     Perso.print_sosa conf base sp true;
     Wserver.printf "%s%s"
       (gen_person_title_text (reference_sp sp) std_access conf base sp)
-      (Date.short_dates_text conf base sp)
+      (DateDisplay.short_dates_text conf base sp)
   in
-  if match p_getenv conf.env "spouse" with
-       Some "on" -> false
-     | _ -> true
-  then
-    print_nospouse ()
-  else
-    let u = Array.to_list (get_family p2) in
-    match u with
-      [] -> print_nospouse ()
-    | _ ->
-        let _ =
-          List.fold_left
-            (fun a ifam ->
-               let cpl = foi base ifam in
-               let sp =
-                 if get_sex p2 = Female then pget conf base (get_father cpl)
-                 else pget conf base (get_mother cpl)
-               in
-               let _ = print_spouse sp a in false)
-            true u
-        in
-        ()
+  if p_getenv conf.env "spouse" = Some "on" then begin
+    match get_family p2 with
+    | [||] -> print_nospouse ()
+    | u ->
+      Array.iteri
+        (fun i ifam ->
+           let cpl = foi base ifam in
+           let sp =
+            if get_sex p2 = Female then pget conf base (get_father cpl)
+            else pget conf base (get_mother cpl)
+           in
+           print_spouse sp (i = 0))
+        u
+  end
+  else print_nospouse ()
 
 let rec print_descend_upto conf base max_cnt ini_p ini_br lev children =
   if lev > 0 && !cnt < max_cnt then
@@ -203,12 +196,12 @@ let rec print_descend_upto conf base max_cnt ini_p ini_br lev children =
                        (Util.transl conf ":") (if with_sp = "" then "<br>" else "")
                  end;
                (* the function children_of returns *all* the children of ip *)
-               List.iter
+               Array.iter
                  (fun ifam ->
                     let children =
                       List.map
                         (fun ip ->
-                           (ip, ia_asex, (get_key_index p, get_sex p) :: rev_br))
+                           (ip, ia_asex, (get_iper p, get_sex p) :: rev_br))
                         (children_of_fam base ifam)
                     in
                     let sp = get_spouse base ip ifam in
@@ -219,7 +212,7 @@ let rec print_descend_upto conf base max_cnt ini_p ini_br lev children =
                         (person_title_text conf base sp) (Util.transl conf ":") ;
                     print_descend_upto conf base max_cnt ini_p ini_br (lev - 1) children;
                  )
-                 (Array.to_list (get_family p)) ;
+                 (get_family p) ;
             if lev <= 2 then Wserver.printf "</li>\n"
              end)
         children;
@@ -230,7 +223,7 @@ let sibling_has_desc_lev conf base lev (ip, _) =
   has_desc_lev conf base lev (pget conf base ip)
 
 let print_cousins_side_of conf base max_cnt a ini_p ini_br lev1 lev2 =
-  let sib = siblings conf base (get_key_index a) in
+  let sib = siblings conf base (get_iper a) in
   if List.exists (sibling_has_desc_lev conf base lev2) sib then
     begin
       if lev1 > 1 then
@@ -266,7 +259,7 @@ let print_cousins_lev conf base max_cnt p lev1 lev2 =
     let rec loop sosa some =
       if !cnt < max_cnt && Sosa.gt last_sosa sosa then
         let some =
-          match Util.branch_of_sosa conf base (get_key_index p) sosa with
+          match Util.old_branch_of_sosa conf base (get_iper p) sosa with
             Some ((ia, _) :: _ as br) ->
               print_cousins_side_of conf base max_cnt (pget conf base ia) p br
                 lev1 lev2 ||
@@ -394,7 +387,7 @@ let print_anniv conf base p dead_people level =
            let leq (_, lev1, _) (_, lev2, _) = lev1 <= lev2
          end)
     in
-    let a = P.add (get_key_index p, 0, 1) P.empty in
+    let a = P.add (get_iper p, 0, 1) P.empty in
     let rec loop set a =
       if P.is_empty a then set
       else
@@ -456,8 +449,8 @@ let print_anniv conf base p dead_people level =
   let mode () =
     Wserver.printf "<input type=\"hidden\" name=\"m\" value=\"C\"%s>\n"
       conf.xhs;
-    Wserver.printf "<input type=\"hidden\" name=\"i\" value=\"%d\"%s>\n"
-      (Adef.int_of_iper (get_key_index p)) conf.xhs;
+    Wserver.printf "<input type=\"hidden\" name=\"i\" value=\"%s\"%s>\n"
+      (string_of_iper (get_iper p)) conf.xhs;
     Wserver.printf "<input type=\"hidden\" name=\"t\" value=\"%s\"%s>\n"
       (if dead_people then "AD" else "AN") conf.xhs
   in

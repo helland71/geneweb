@@ -84,7 +84,7 @@ module MF : MF =
       | None -> ()
       end;
       close_out oc;
-      Util.rm fname ;
+      Mutil.rm fname ;
       Sys.rename tmp fname
     let patch fname pos str =
       let fname =
@@ -110,14 +110,14 @@ module MF : MF =
           end;
           close_in ic;
           close_out oc;
-          Util.rm fname ;
+          Mutil.rm fname ;
           Sys.rename tmp_fname fname
       | None -> ()
     let open_in fname =
       {ic_fname = fname; ic_chan = open_in_bin fname; ic_ext = 0}
     let input_char ic = input_char ic.ic_chan
     let rec input_line ic =
-      try Pervasives.input_line ic.ic_chan with
+      try Stdlib.input_line ic.ic_chan with
         End_of_file ->
           let ext = ic.ic_ext + 1 in
           let fn = ic.ic_fname ^ "." ^ string_of_int ext in
@@ -512,7 +512,7 @@ and eval_date_var conf date =
         Dgreg (d, _) -> VVstring (string_of_int d.month)
       | _ -> VVstring ""
       end
-  | [] -> VVstring (Util.translate_eval (Date.string_of_date conf date))
+  | [] -> VVstring (Util.translate_eval (DateDisplay.string_of_date conf date))
   | _ -> raise Not_found
 and eval_message_text_var conf base str so =
   function
@@ -735,23 +735,22 @@ let print_add_ok conf base =
   then
     visualize conf base mess
   else if mess.m_ident = "" || mess.m_text = "" then print conf base
-  else
+  else begin
     let title _ =
       Wserver.printf "%s" (capitale (transl conf "message added"))
     in
-    try
-      let mods = moderators conf in
-      forum_add conf base (mods <> []) mess;
-      Hutil.header conf title;
-      Hutil.print_link_to_welcome conf true;
-      if mods <> [] then
-        Wserver.printf "<p>%s. %s.</p>"
-          (capitale (transl conf "this forum is moderated"))
-          (capitale (transl conf "your message is waiting for validation"));
-      Wserver.printf "<a href=\"%sm=FORUM\">%s</a>\n" (commd conf)
-        (capitale (transl conf "database forum"));
-      Hutil.trailer conf
-    with Update.ModErr -> ()
+    let mods = moderators conf in
+    forum_add conf base (mods <> []) mess;
+    Hutil.header conf title;
+    Hutil.print_link_to_welcome conf true;
+    if mods <> [] then
+      Wserver.printf "<p>%s. %s.</p>"
+        (capitale (transl conf "this forum is moderated"))
+        (capitale (transl conf "your message is waiting for validation"));
+    Wserver.printf "<a href=\"%sm=FORUM\">%s</a>\n" (commd conf)
+      (capitale (transl conf "database forum"));
+    Hutil.trailer conf
+  end
 
 (* Deleting a message *)
 
@@ -795,11 +794,10 @@ let delete_forum_message conf base pos =
       if a && conf.wizard && conf.user <> "" && m.m_wizard = conf.user &&
          passwd_in_file conf "wizard" ||
          conf.manitou || conf.supervisor
-      then
-        try
-          forum_del conf pos;
-          print_del_ok conf (find_next_pos conf pos)
-        with Update.ModErr -> ()
+      then begin
+        forum_del conf pos;
+        print_del_ok conf (find_next_pos conf pos)
+      end
       else print_forum_headers conf base
   | None -> print_forum_headers conf base
 

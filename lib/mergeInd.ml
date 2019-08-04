@@ -29,19 +29,19 @@ let print_differences conf base branches p1 p2 =
   Util.hidden_env conf;
   Wserver.printf "<input type=\"hidden\" name=\"m\" value=\"MRG_IND_OK\"%s>\n"
     conf.xhs;
-  Wserver.printf "<input type=\"hidden\" name=\"i1\" value=\"%d\"%s>\n"
-    (Adef.int_of_iper (get_key_index p1)) conf.xhs;
-  Wserver.printf "<input type=\"hidden\" name=\"i2\" value=\"%d\"%s>\n"
-    (Adef.int_of_iper (get_key_index p2)) conf.xhs;
+  Wserver.printf "<input type=\"hidden\" name=\"i1\" value=\"%s\"%s>\n"
+    (string_of_iper (get_iper p1)) conf.xhs;
+  Wserver.printf "<input type=\"hidden\" name=\"i2\" value=\"%s\"%s>\n"
+    (string_of_iper (get_iper p2)) conf.xhs;
   begin let rec loop =
     function
       [ip1, ip2] ->
         Wserver.printf
-          "<input type=\"hidden\" name=\"ini1\" value=\"%d\"%s>\n"
-          (Adef.int_of_iper ip1) conf.xhs;
+          "<input type=\"hidden\" name=\"ini1\" value=\"%s\"%s>\n"
+          (string_of_iper ip1) conf.xhs;
         Wserver.printf
-          "<input type=\"hidden\" name=\"ini2\" value=\"%d\"%s>\n"
-          (Adef.int_of_iper ip2) conf.xhs
+          "<input type=\"hidden\" name=\"ini2\" value=\"%s\"%s>\n"
+          (string_of_iper ip2) conf.xhs
     | _ :: branches -> loop branches
     | _ -> ()
   in
@@ -62,8 +62,7 @@ let print_differences conf base branches p1 p2 =
         ["iexcl"; "fexcl"]
   | _ -> ()
   end;
-  Wserver.printf "</p>\n";
-  html_p conf;
+  Wserver.printf "</p><p>";
   string_field (transl_nth conf "first name/first names" 0) "first_name"
     (fun p -> p_first_name base p);
   string_field (transl_nth conf "surname/surnames" 0) "surname"
@@ -109,14 +108,14 @@ let print_differences conf base branches p1 p2 =
     (fun p ->
        match Adef.od_of_cdate (get_birth p) with
          None -> ""
-       | Some d -> Date.string_of_ondate conf d);
+       | Some d -> DateDisplay.string_of_ondate conf d);
   string_field (transl conf "birth" ^ " / " ^ transl conf "place")
     "birth_place" (fun p -> sou base (get_birth_place p));
   string_field (transl conf "baptism") "baptism"
     (fun p ->
        match Adef.od_of_cdate (get_baptism p) with
          None -> ""
-       | Some d -> Date.string_of_ondate conf d);
+       | Some d -> DateDisplay.string_of_ondate conf d);
   string_field (transl conf "baptism" ^ " / " ^ transl conf "place")
     "baptism_place" (fun p -> sou base (get_baptism_place p));
   string_field (transl conf "death") "death"
@@ -133,7 +132,7 @@ let print_differences conf base branches p1 p2 =
              | Disappeared -> transl_nth conf "disappeared" is
              | Unspecified -> transl_nth conf "died" is
            in
-           s ^ " " ^ Date.string_of_ondate conf (Adef.date_of_cdate cd)
+           s ^ " " ^ DateDisplay.string_of_ondate conf (Adef.date_of_cdate cd)
        | DeadYoung -> transl_nth conf "died young" is
        | DeadDontKnowWhen -> transl_nth conf "died" is
        | DontKnowIfDead | OfCourseDead -> "");
@@ -148,20 +147,17 @@ let print_differences conf base branches p1 p2 =
            transl_nth conf "buried" is ^
            (match Adef.od_of_cdate cod with
               None -> ""
-            | Some d -> " " ^ Date.string_of_ondate conf d)
+            | Some d -> " " ^ DateDisplay.string_of_ondate conf d)
        | Cremated cod ->
            transl_nth conf "cremated" is ^
            (match Adef.od_of_cdate cod with
               None -> ""
-            | Some d -> " " ^ Date.string_of_ondate conf d));
+            | Some d -> " " ^ DateDisplay.string_of_ondate conf d));
   string_field (transl conf "burial" ^ " / " ^ transl conf "place")
     "burial_place" (fun p -> sou base (get_burial_place p));
-  html_p conf;
   Wserver.printf
-    "<button type=\"submit\" class=\"btn btn-primary btn-lg\">\n";
-  Wserver.printf "%s" (capitale (transl_nth conf "validate/delete" 0));
-  Wserver.printf "</button>\n";
-  Wserver.printf "</form>\n"
+    {|</p><p><button type="submit" class="btn btn-primary btn-lg">%s</button></form>|}
+    (capitale (transl_nth conf "validate/delete" 0))
 
 let compatible_cdates cd1 cd2 =
   cd1 = cd2
@@ -252,63 +248,44 @@ let propose_merge_ind conf base branches p1 p2 =
     Wserver.printf "%s" (capitale (transl_decline conf "merge" s))
   in
   Hutil.header conf title;
-  if branches <> [] then
-    begin
-      Wserver.printf "%s%s\n" (capitale (transl conf "you must first merge"))
-        (transl conf ":");
-      begin
-        Wserver.printf "<ul>\n";
-        html_li conf;
-        begin
-          Wserver.printf "<a href=\"%s%s\">" (commd conf)
-            (acces conf base p1);
-          Merge.print_someone base p1;
-          Wserver.printf "</a>"
-        end;
-        Wserver.printf "\n%s\n" (transl_nth conf "and" 0);
-        begin
-          Wserver.printf "<a href=\"%s%s\">" (commd conf)
-            (acces conf base p2);
-          Merge.print_someone base p2;
-          Wserver.printf "</a>"
-        end;
-        Wserver.printf "\n";
-        Wserver.printf "</ul>\n"
-      end;
-      html_p conf
-    end;
+  if branches <> [] then begin
+    Wserver.printf
+      "%s%s<ul><li><a href=\"%s%s\">"
+      (capitale (transl conf "you must first merge"))
+      (transl conf ":")
+      (commd conf)
+      (acces conf base p1);
+    Merge.print_someone base p1;
+    Wserver.printf "</a> %s <a href=\"%s%s\">"
+      (transl_nth conf "and" 0)
+      (commd conf)
+      (acces conf base p2);
+    Merge.print_someone base p2;
+    Wserver.printf "</a></li></ul><p></p>\n"
+  end;
   print_differences conf base branches p1 p2;
   if branches <> [] then
     begin
-      html_p conf;
-      Wserver.printf "<hr%s>\n" conf.xhs;
-      html_p conf;
-      Wserver.printf "%s%s\n" (capitale (transl_nth conf "branch/branches" 1))
-        (transl conf ":");
-      html_p conf;
-      begin
-        Wserver.printf "<table>\n";
-        List.iter
-          (fun (ip1, ip2) ->
-             let p1 = poi base ip1 in
-             let p2 = poi base ip2 in
-             Wserver.printf "<tr align=\"%s\">\n" conf.left;
-             Wserver.printf "<td>\n";
-             Wserver.printf "\n%s" (referenced_person_text conf base p1);
-             Wserver.printf "%s" (Date.short_dates_text conf base p1);
-             Wserver.printf "</td>\n";
-             Wserver.printf "<td>\n";
-             Wserver.printf "\n%s" (referenced_person_text conf base p2);
-             Wserver.printf "%s" (Date.short_dates_text conf base p2);
-             Wserver.printf "</td>\n";
-             Wserver.printf "</tr>\n")
-          ((get_key_index p1, get_key_index p2) :: branches);
-        Wserver.printf "</table>\n"
-      end
-    end;
+      Wserver.printf
+        "<p><hr></p><p>%s%s</p><table>"
+        (capitale (transl_nth conf "branch/branches" 1)) (transl conf ":") ;
+      List.iter
+        (fun (ip1, ip2) ->
+           let p1 = poi base ip1 in
+           let p2 = poi base ip2 in
+           Wserver.printf
+             "<tr align=\"%s\"><td>%s%s</td><td>%s%s</td></tr>"
+             conf.left
+             (referenced_person_text conf base p1)
+             (DateDisplay.short_dates_text conf base p1)
+             (referenced_person_text conf base p2)
+             (DateDisplay.short_dates_text conf base p2))
+        ((get_iper p1, get_iper p2) :: branches);
+      Wserver.printf "</table>\n"
+    end ;
   Hutil.trailer conf
 
-let reparent_ind base warning ip1 ip2 =
+let reparent_ind base (warning : CheckItem.base_warning -> unit) ip1 ip2 =
   let a1 = poi base ip1 in
   let a2 = poi base ip2 in
   match get_parents a1, get_parents a2 with
@@ -333,72 +310,52 @@ let reparent_ind base warning ip1 ip2 =
       end
   | _ -> ()
 
-let effective_merge_ind conf base warning p1 p2 =
-  let u2 = poi base (get_key_index p2) in
+let effective_merge_ind conf base (warning : CheckItem.base_warning -> unit) p1 p2 =
+  let u2 = poi base (get_iper p2) in
   if Array.length (get_family u2) <> 0 then
     begin
       for i = 0 to Array.length (get_family u2) - 1 do
         let ifam = (get_family u2).(i) in
         let cpl = foi base ifam in
         let cpl =
-          if get_key_index p2 = get_father cpl then
-            Gutil.couple false (get_key_index p1) (get_mother cpl)
-          else if get_key_index p2 = get_mother cpl then
-            Gutil.couple false (get_father cpl) (get_key_index p1)
+          if get_iper p2 = get_father cpl then
+            Gutil.couple false (get_iper p1) (get_mother cpl)
+          else if get_iper p2 = get_mother cpl then
+            Gutil.couple false (get_father cpl) (get_iper p1)
           else assert false
         in
         patch_couple base ifam cpl
       done;
       let u1 = {family = Array.append (get_family p1) (get_family u2)} in
-      patch_union base (get_key_index p1) u1;
-      let u2 = {family = [| |]} in patch_union base (get_key_index p2) u2
+      patch_union base (get_iper p1) u1;
+      let u2 = {family = [| |]} in patch_union base (get_iper p2) u2
     end;
   let p1 =
-    {(gen_person_of_person p1) with sex =
-      if get_sex p2 <> Neuter then get_sex p2 else get_sex p1;
-     birth =
-       if get_birth p1 = Adef.cdate_None then get_birth p2 else get_birth p1;
-     birth_place =
-       if is_empty_string (get_birth_place p1) then get_birth_place p2
-       else get_birth_place p1;
-     birth_src =
-       if is_empty_string (get_birth_src p1) then get_birth_src p2
-       else get_birth_src p1;
-     baptism =
-       if get_baptism p1 = Adef.cdate_None then get_baptism p2
-       else get_baptism p1;
-     baptism_place =
-       if is_empty_string (get_baptism_place p1) then get_baptism_place p2
-       else get_baptism_place p1;
-     baptism_src =
-       if is_empty_string (get_baptism_src p1) then get_baptism_src p2
-       else get_baptism_src p1;
-     death =
-       if get_death p1 = DontKnowIfDead then get_death p2 else get_death p1;
-     death_place =
-       if is_empty_string (get_death_place p1) then get_death_place p2
-       else get_death_place p1;
-     death_src =
-       if is_empty_string (get_death_src p1) then get_death_src p2
-       else get_death_src p1;
-     burial =
-       if get_burial p1 = UnknownBurial then get_burial p2 else get_burial p1;
-     burial_place =
-       if is_empty_string (get_burial_place p1) then get_burial_place p2
-       else get_burial_place p1;
-     burial_src =
-       if is_empty_string (get_burial_src p1) then get_burial_src p2
-       else get_burial_src p1;
-     occupation =
-       if is_empty_string (get_occupation p1) then get_occupation p2
-       else get_occupation p1;
-     notes =
-       if is_empty_string (get_notes p1) then get_notes p2 else get_notes p1}
+    let get_string fn = if is_empty_string (fn p1) then fn p2 else fn p1 in
+    {(gen_person_of_person p1) with
+     sex = if get_sex p2 <> Neuter then get_sex p2 else get_sex p1
+     ; birth = if get_birth p1 = Adef.cdate_None then get_birth p2 else get_birth p1
+     ; birth_place = get_string get_birth_place
+     ; birth_src = get_string get_birth_src
+     ; baptism =
+         if get_baptism p1 = Adef.cdate_None then get_baptism p2
+         else get_baptism p1
+     ; baptism_place = get_string get_baptism_place
+     ; baptism_src = get_string get_baptism_src
+     ; death =
+         if get_death p1 = DontKnowIfDead then get_death p2 else get_death p1
+     ; death_place = get_string get_death_place
+     ; death_src = get_string get_death_src
+     ; burial =
+         if get_burial p1 = UnknownBurial then get_burial p2 else get_burial p1
+     ; burial_place = get_string get_burial_place
+     ; burial_src = get_string get_burial_src
+     ; occupation = get_string get_occupation
+     ; notes = get_string get_notes
+    }
   in
   patch_person base p1.key_index p1;
-  reparent_ind base warning p1.key_index (get_key_index p2);
-  delete_key base (sou base (get_first_name p2)) (sou base (get_surname p2))
-    (get_occ p2);
+  reparent_ind base warning p1.key_index (get_iper p2);
   let p2 = UpdateIndOk.effective_del base warning p2 in
   patch_person base p2.key_index p2;
   let s =
@@ -420,17 +377,17 @@ let effective_merge_ind conf base warning p1 p2 =
   Notes.update_notes_links_db conf (NotesLinks.PgInd p1.key_index) s
 
 let is_ancestor base p1 p2 =
-  let ip1 = get_key_index p1 in
-  let ip2 = get_key_index p2 in
-  let visited = Array.make (nb_of_persons base) false in
+  let ip1 = get_iper p1 in
+  let ip2 = get_iper p2 in
+  let visited = Gwdb.iper_marker (Gwdb.ipers base) false in
   let rec loop ip =
-    if visited.(Adef.int_of_iper ip) then false
+    if Gwdb.Marker.get visited ip then false
     else if ip = ip1 then true
     else
       begin
-        visited.(Adef.int_of_iper ip) <- true;
+        Gwdb.Marker.set visited ip true ;
         match get_parents (poi base ip) with
-          Some ifam ->
+        | Some ifam ->
             let cpl = foi base ifam in
             loop (get_father cpl) || loop (get_mother cpl)
         | None -> false
@@ -454,7 +411,7 @@ let error_loop conf base p =
   Hutil.trailer conf
 
 let check_ind base p1 p2 =
-  if get_key_index p1 = get_key_index p2 then raise Same_person
+  if get_iper p1 = get_iper p2 then raise Same_person
   else if get_sex p1 <> get_sex p2 && get_sex p1 <> Neuter
           && get_sex p2 <> Neuter
   then raise Different_sexes
@@ -479,18 +436,13 @@ let propose_merge_fam conf base branches fam1 fam2 p1 p2 =
   Wserver.printf "%s%s\n"
     (capitale (transl conf "you must first merge the 2 families"))
     (transl conf ":");
-  Wserver.printf "<ul>\n";
-  html_li conf;
-  Wserver.printf "<a href=\"%s%s\">" (commd conf) (acces conf base p1);
+  Wserver.printf "<ul><li><a href=\"%s%s\">"
+    (commd conf) (acces conf base p1);
   Merge.print_someone base p1;
-  Wserver.printf "</a>";
-  Wserver.printf "\n%s\n" (transl conf "with");
-  Wserver.printf "<a href=\"%s%s\">" (commd conf) (acces conf base p2);
+  Wserver.printf "</a> %s <a href=\"%s%s\">"
+    (transl conf "with") (commd conf) (acces conf base p2);
   Merge.print_someone base p2;
-  Wserver.printf "</a>";
-  Wserver.printf "\n";
-  Wserver.printf "</ul>\n";
-  html_p conf;
+  Wserver.printf "</a></li></ul><p>";
   MergeFam.print_differences conf base branches fam1 fam2;
   Hutil.trailer conf
 
@@ -607,8 +559,9 @@ let print_merged conf base wl p =
   Wserver.printf "%s\n" (referenced_person_text conf base p);
   Wserver.printf "</li>\n";
   Wserver.printf "</ul>\n";
-  begin match p_getenv conf.env "m", p_getint conf.env "ip" with
+  begin match p_getenv conf.env "m", p_getenv conf.env "ip" with
     Some "MRG_DUP_IND_Y_N", Some ip ->
+      let ip = iper_of_string ip in
       let s1 =
         match p_getenv conf.env "iexcl" with
           Some "" | None -> ""
@@ -620,11 +573,11 @@ let print_merged conf base wl p =
         | Some s -> "&fexcl=" ^ s
       in
       Wserver.printf "<p>\n";
-      Wserver.printf "<a href=%sm=MRG_DUP&ip=%d%s%s>" (commd conf) ip s1 s2;
+      Wserver.printf "<a href=%sm=MRG_DUP&ip=%s%s%s>" (commd conf) (string_of_iper ip) s1 s2;
       Wserver.printf "%s" (capitale (transl conf "continue merging"));
       Wserver.printf "</a>";
       begin
-        let p =  poi base (Adef.iper_of_int ip) in
+        let p =  poi base ip in
         let s = person_text conf base p in
         Wserver.printf "\n(%s)\n"
           (Util.transl_a_of_b conf
@@ -641,7 +594,7 @@ let merge conf base p1 p2 propose_merge_ind =
   let rev_wl = ref [] in
   let warning w = rev_wl := w :: !rev_wl in
   let (ok, changes_done) =
-    try_merge conf base warning [] (get_key_index p1) (get_key_index p2)
+    try_merge conf base warning [] (get_iper p1) (get_iper p2)
       false propose_merge_ind
   in
   if changes_done then Util.commit_patches conf base;
@@ -657,13 +610,13 @@ let merge conf base p1 p2 propose_merge_ind =
 
 let print conf base =
   let p1 =
-    match p_getint conf.env "i" with
-      Some i1 -> Some (poi base (Adef.iper_of_int i1))
+    match p_getenv conf.env "i" with
+      Some i1 -> Some (poi base (iper_of_string i1))
     | None -> None
   in
   let p2 =
-    match p_getint conf.env "i2" with
-      Some i2 -> Some (poi base (Adef.iper_of_int i2))
+    match p_getenv conf.env "i2" with
+      Some i2 -> Some (poi base (iper_of_string i2))
     | None ->
         match p_getenv conf.env "select", p_getenv conf.env "n" with
           (Some "input" | None), Some n ->
@@ -673,7 +626,7 @@ let print conf base =
             | _ -> None
             end
         | Some x, (Some "" | None) ->
-            Some (poi base (Adef.iper_of_int (int_of_string x)))
+            Some (poi base (iper_of_string x))
         | _ -> None
   in
   match p1, p2 with
@@ -701,7 +654,7 @@ let rec kill_ancestors conf base included_self p nb_ind nb_fam =
   | None -> ()
   end;
   if included_self then
-    let ip = get_key_index p in
+    let ip = get_iper p in
     let warning _ = () in
     let p = UpdateIndOk.effective_del base warning p in
     patch_person base ip p; incr nb_ind

@@ -11,8 +11,8 @@ open Util
 type gen_record =
   { date : string;
     wizard : string;
-    gen_p : (iper, string) gen_person;
-    gen_f : (iper, string) gen_family list;
+    gen_p : (iper, iper, string) gen_person;
+    gen_f : (iper, ifam, string) gen_family list;
     gen_c : iper array list }
 
 
@@ -112,14 +112,14 @@ let make_gen_record conf base first gen_p =
   (* On fait en sorte qu'il y a une 'bijection' *)
   (* entre les familles et les enfants.         *)
   let (gen_f, gen_c) =
-    List.fold_right
+    Array.fold_right
       (fun ifam (accu_fam, accu_child) ->
          let fam = foi base ifam in
          let children = get_children fam in
          let gen_f = gen_family_of_family fam in
          Util.string_gen_family base gen_f :: accu_fam,
          children :: accu_child)
-      (Array.to_list fam) ([], [])
+      fam ([], [])
   in
   {date = date; wizard = conf.user; gen_p = gen_p; gen_f = gen_f;
    gen_c = gen_c}
@@ -203,7 +203,7 @@ let record_diff conf base changed =
           let gr = make_gen_record conf base false gen_sp in
           write_history_file conf sp_file sp_fname gr;
           (* Création des fichiers pour les enfants ajoutés. *)
-          List.iter
+          Array.iter
             (fun ip ->
                let p = poi base ip in
                let person_file =
@@ -217,7 +217,7 @@ let record_diff conf base changed =
                  let gen_p = Util.string_gen_person base gen_p in
                  let gr = make_gen_record conf base false gen_p in
                  write_history_file conf person_file fname gr)
-            (Array.to_list (get_children cpl))
+            (get_children cpl)
       | U_Change_children_name (_, list) ->
           List.iter
             (fun ((ofn, osn, oocc, _oip), (fn, sn, occ, ip)) ->
@@ -381,7 +381,7 @@ let print_clean_ok conf =
       let history = load_person_history conf f in
       let new_history = clean_history 0 history [] in
       let fname = history_path conf f in
-      if new_history = [] then Util.rm fname
+      if new_history = [] then Mutil.rm fname
       else
         begin let ext_flags =
           [Open_wronly; Open_trunc; Open_creat; Open_binary; Open_nonblock]
@@ -406,7 +406,7 @@ let print_clean_ok conf =
 let person_of_gen_p_key base gen_p =
   match person_of_key base gen_p.first_name gen_p.surname gen_p.occ with
     Some ip -> poi base ip
-  | None -> Gwdb.empty_person base (Adef.iper_of_int (-1))
+  | None -> Gwdb.empty_person base Gwdb.dummy_iper
 
 (* N'est pas forcément très précis. En effet, on enregistre que     *)
 (* les ipers. Or lors d'un nettoyage de la base, il se peut que     *)
@@ -417,25 +417,21 @@ let person_of_iper conf base ip =
     if authorized_age conf base p then Util.person_text conf base p else ""
   with _ -> ""
 
-let person_of_iper_list conf base ipl =
-  let list =
-    List.fold_right
-      (fun ip accu ->
-         let p = person_of_iper conf base ip in
-         if p = "" then accu else p :: accu)
-      ipl []
-  in
-  String.concat ", " list
-
+let person_of_iper_array conf base ipl =
+  String.concat ", " @@
+  Array.fold_right
+    (fun ip accu ->
+       match person_of_iper conf base ip with "" -> accu | p -> p :: accu)
+    ipl []
 
 let string_of_cdate conf cod =
   match Adef.od_of_cdate cod with
-    Some d -> Date.string_slash_of_date conf d
+    Some d -> DateDisplay.string_slash_of_date conf d
   | None -> ""
 
 let string_of_death conf death =
   match death with
-    Death (_, cd) -> Date.string_slash_of_date conf (Adef.date_of_cdate cd)
+    Death (_, cd) -> DateDisplay.string_slash_of_date conf (Adef.date_of_cdate cd)
   | _ -> ""
 
 let string_of_burial conf burial =
@@ -537,10 +533,16 @@ let string_of_rparents conf base rparents =
 
 let string_of_marriage conf marriage =
   match marriage with
-    NotMarried | NoSexesCheckNotMarried -> transl conf "with"
+  | NotMarried | NoSexesCheckNotMarried -> transl conf "with"
   | Married | NoSexesCheckMarried -> transl conf "married"
   | Engaged -> transl conf "engaged"
-  | NoMention -> transl conf "with"
+  | NoMention
+  | MarriageBann
+  | MarriageContract
+  | MarriageLicense
+  | Pacs
+  | Residence
+    -> transl conf "with"
 
 let string_of_divorce conf divorce =
   match divorce with
@@ -550,12 +552,12 @@ let string_of_divorce conf divorce =
 
 let string_of_event_witness conf base witnesses =
   let witnesses =
-    List.fold_right
+    Array.fold_right
       (fun (ip, wk) accu ->
          let witn = person_of_iper conf base ip in
          let kind = Util.string_of_witness_kind conf (get_sex @@ poi base ip) wk in
          if witn = "" then (kind ^ ": " ^ witn) :: accu else accu)
-      (Array.to_list witnesses) []
+      witnesses []
   in
   String.concat ", " witnesses
 
@@ -707,7 +709,7 @@ let diff_string before after =
 type 'a env =
     Vgen_record of gen_record
   | Vfam of
-      (iper, string) gen_family option * (iper, string) gen_family option *
+      (iper, ifam, string) gen_family option * (iper, ifam, string) gen_family option *
         bool
   | Vchild of iper array option * iper array option
   | Vfevent of
@@ -1094,17 +1096,11 @@ and eval_str_gen_record conf base env (bef, aft, p_auth) =
           if m_auth then
             match bef, aft with
               Some b, Some a ->
-                let b =
-                  person_of_iper_list conf base (Array.to_list b.witnesses)
-                in
-                let a =
-                  person_of_iper_list conf base (Array.to_list a.witnesses)
-                in
+                let b = person_of_iper_array conf base b.witnesses in
+                let a = person_of_iper_array conf base a.witnesses in
                 diff_string b a
-            | None, Some a ->
-                "", person_of_iper_list conf base (Array.to_list a.witnesses)
-            | Some b, None ->
-                person_of_iper_list conf base (Array.to_list b.witnesses), ""
+            | None, Some a -> "", person_of_iper_array conf base a.witnesses
+            | Some b, None -> person_of_iper_array conf base b.witnesses, ""
             | None, None -> "", ""
           else "", ""
       | _ -> raise Not_found
@@ -1274,13 +1270,11 @@ and eval_str_gen_record conf base env (bef, aft, p_auth) =
               Vchild (bef, aft) ->
                 begin match bef, aft with
                   Some b, Some a ->
-                    let b = person_of_iper_list conf base (Array.to_list b) in
-                    let a = person_of_iper_list conf base (Array.to_list a) in
+                    let b = person_of_iper_array conf base b in
+                    let a = person_of_iper_array conf base a in
                     diff_string b a
-                | None, Some a ->
-                    "", person_of_iper_list conf base (Array.to_list a)
-                | Some b, None ->
-                    person_of_iper_list conf base (Array.to_list b), ""
+                | None, Some a -> "", person_of_iper_array conf base a
+                | Some b, None -> person_of_iper_array conf base b, ""
                 | None, None -> "", ""
                 end
             | _ -> raise Not_found
@@ -1460,7 +1454,7 @@ let eval_predefined_apply conf _env f vl =
              Dgregorian)
         in
         let time = String.sub date_txt 11 8 in
-        Date.string_of_date conf date ^ ", " ^ time
+        DateDisplay.string_of_date conf date ^ ", " ^ time
       with Failure _ -> date_txt
       end
   | _ -> raise Not_found

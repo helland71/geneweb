@@ -19,8 +19,6 @@ let parent_array = Adef.parent_array
 let spouse ip cpl =
   if ip = get_father cpl then get_mother cpl else get_father cpl
 
-let person_ht_add base s ip = patch_name base s ip
-
 let person_is_key base p k =
   let k = Name.crush_lower k in
   if k = Name.crush_lower (p_first_name base p ^ " " ^ p_surname base p) then
@@ -227,20 +225,14 @@ let sort_person_list base pl =
          Adef.od_of_cdate (get_birth p1), get_death p1,
          Adef.od_of_cdate (get_birth p2), get_death p2
        with
-         Some d1, _, Some d2, _ ->
-           if CheckItem.strictly_before d1 d2 then -1 else 1
+       | Some d1, _, Some d2, _ ->
+         Date.compare_date d1 d2
        | Some d1, _, _, Death (_, d2) ->
-           if CheckItem.strictly_before d1 (Adef.date_of_cdate d2) then -1
-           else 1
+         Date.compare_date d1 (Adef.date_of_cdate d2)
        | _, Death (_, d1), Some d2, _ ->
-           if CheckItem.strictly_before (Adef.date_of_cdate d1) d2 then -1
-           else 1
+         Date.compare_date (Adef.date_of_cdate d1) d2
        | _, Death (_, d1), _, Death (_, d2) ->
-           if CheckItem.strictly_before (Adef.date_of_cdate d1)
-                (Adef.date_of_cdate d2)
-           then
-             -1
-           else 1
+         Date.compare_date (Adef.date_of_cdate d1) (Adef.date_of_cdate d2)
        | Some _, _, _, _ -> 1
        | _, Death (_, _), _, _ -> 1
        | _, _, Some _, _ -> -1

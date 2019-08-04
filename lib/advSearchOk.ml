@@ -105,28 +105,25 @@ let advanced_search conf base max_answers =
           in
           Hashtbl.add hd x v; v
     in
-    match d1, d2 with
-      Some d1, Some d2 ->
+    authorized_age conf base p
+    && match d1, d2 with
+      | Some (Dgreg (d1, _)), Some (Dgreg (d2, _)) ->
         begin match df () with
-          Some (Dgreg (_, _) as d) when authorized_age conf base p ->
-            if CheckItem.strictly_before d d1 then false
-            else if CheckItem.strictly_before d2 d then false
-            else true
-        | _ -> false
+          | Some (Dgreg (d, _)) ->
+            Date.compare_dmy d d1 >= 0 && Date.compare_dmy d d2 <= 0
+          | _ -> false
         end
-    | Some d1, _ ->
+      | Some (Dgreg (d1, _)), _ ->
         begin match df () with
-          Some (Dgreg (_, _) as d) when authorized_age conf base p ->
-            if CheckItem.strictly_before d d1 then false else true
-        | _ -> false
+          | Some (Dgreg (d, _)) -> Date.compare_dmy d d1 >= 0
+          | _ -> false
         end
-    | _, Some d2 ->
+      | _, Some (Dgreg (d2, _)) ->
         begin match df () with
-          Some (Dgreg (_, _) as d) when authorized_age conf base p ->
-            if CheckItem.strictly_after d d2 then false else true
-        | _ -> false
+          | Some (Dgreg (d, _)) -> Date.compare_dmy d d2 <= 0
+          | _ -> false
         end
-    | _ -> empty_default_value
+      | _ -> empty_default_value
   in
   let match_sex p empty_default_value =
     apply_to_field_value p "sex"
@@ -242,7 +239,7 @@ let advanced_search conf base max_answers =
     in
     let y = gets y in
     let test_date_place df =
-      List.exists
+      Array.exists
         (fun ifam ->
            let fam = foi base ifam in
            let father = poi base (get_father fam) in
@@ -255,33 +252,33 @@ let advanced_search conf base max_answers =
                name_incl y (sou base (get_marriage_place fam)) &&
                df (Adef.od_of_cdate (get_marriage fam))
            else false)
-        (Array.to_list (get_family p))
+        (get_family p)
     in
     match d1, d2 with
       Some d1, Some d2 ->
         test_date_place
           (function
              Some (Dgreg (_, _) as d) ->
-               if CheckItem.strictly_before d d1 then false
-               else if CheckItem.strictly_before d2 d then false
+               if Date.compare_date d d1 < 0 then false
+               else if Date.compare_date d2 d < 0 then false
                else true
            | _ -> false)
     | Some d1, _ ->
         test_date_place
           (function
              Some (Dgreg (_, _) as d) when authorized_age conf base p ->
-               if CheckItem.strictly_before d d1 then false else true
+               if Date.compare_date d d1 < 0 then false else true
            | _ -> false)
     | _, Some d2 ->
         test_date_place
           (function
              Some (Dgreg (_, _) as d) when authorized_age conf base p ->
-               if CheckItem.strictly_after d d2 then false else true
+               if Date.compare_date d d2 > 0 then false else true
            | _ -> false)
     | _ ->
         if y = "" then empty_default_value
         else
-          List.exists
+          Array.exists
             (fun ifam ->
                let fam = foi base ifam in
                let father = poi base (get_father fam) in
@@ -291,43 +288,45 @@ let advanced_search conf base max_answers =
                then
                  name_incl y (sou base (get_marriage_place fam))
                else false)
-            (Array.to_list (get_family p))
+            (get_family p)
   in
-  let list = ref [] in
-  let len = ref 0 in
   (* Check the civil status. The test is the same for an AND or a OR search request. *)
   let match_civil_status p =
     match_sex p true && match_first_name p true && match_surname p true &&
     match_married p true && match_occupation p true
   in
-  let match_person p search_type =
-    if search_type <> "OR" then
-      (if match_civil_status p && match_baptism_date p true &&
-          match_baptism_place p true && match_birth_date p true &&
-          match_birth_place p true && match_burial_date p true &&
-          match_burial_place p true && match_death_date p true &&
-          match_death_place p true &&
-          match_marriage p marriage_date_field_name marriage_place_field_name
-            true
-       then
-         begin list := p :: !list; incr len end)
+  let match_person ((list, len) as acc) p search_type =
+    if search_type <> "OR"
+    then if match_civil_status p
+         && match_baptism_date p true
+         && match_baptism_place p true
+         && match_birth_date p true
+         && match_birth_place p true
+         && match_burial_date p true
+         && match_burial_place p true
+         && match_death_date p true
+         && match_death_place p true
+         && match_marriage p marriage_date_field_name marriage_place_field_name true
+      then (p :: list, len +1)
+      else acc
     else if
-      match_civil_status p &&
-      (gets "place" = "" && gets "date2_yyyy" = "" &&
-       gets "date1_yyyy" = "" ||
-       (match_baptism_date p false || match_baptism_place p false) &&
-       match_baptism_date p true && match_baptism_place p true ||
-       (match_birth_date p false || match_birth_place p false) &&
-       match_birth_date p true && match_birth_place p true ||
-       (match_burial_date p false || match_burial_place p false) &&
-       match_burial_date p true && match_burial_place p true ||
-       (match_death_date p false || match_death_place p false) &&
-       match_death_date p true && match_death_place p true ||
-       match_marriage p marriage_date_field_name marriage_place_field_name
-         false)
-    then
-      begin list := p :: !list; incr len end
+      match_civil_status p
+      && (gets "place" = "" && gets "date2_yyyy" = ""
+          && gets "date1_yyyy" = ""
+          || (match_baptism_date p false || match_baptism_place p false)
+          && match_baptism_date p true && match_baptism_place p true
+          || (match_birth_date p false || match_birth_place p false)
+          && match_birth_date p true && match_birth_place p true
+          || (match_burial_date p false || match_burial_place p false)
+          && match_burial_date p true && match_burial_place p true
+          || (match_death_date p false || match_death_place p false)
+          && match_death_date p true && match_death_place p true
+          || match_marriage p marriage_date_field_name marriage_place_field_name false
+         )
+    then (p :: list, len + 1)
+    else acc
   in
+  let list, len =
   if gets "first_name" <> "" || gets "surname" <> "" then
     let (slist, _) =
       if gets "first_name" <> "" then
@@ -339,20 +338,21 @@ let advanced_search conf base max_answers =
           (spi_find (persons_of_surname base)) get_surname (gets "surname")
     in
     let slist = List.fold_right (fun (_, _, l) sl -> l @ sl) slist [] in
-    let rec loop =
-      function
-        [] -> ()
+    let rec loop ((_, len) as acc) = function
+      | [] -> acc
+      | _ when len > max_answers -> acc
       | ip :: l ->
-          if !len > max_answers then ()
-          else begin match_person (pget conf base ip) search_type; loop l end
+        loop (match_person acc (pget conf base ip) search_type) l
     in
-    loop slist
+    loop ([], 0) slist
   else
-    for i = 0 to nb_of_persons base - 1 do
-      if !len > max_answers then ()
-      else match_person (pget conf base (Adef.iper_of_int i)) search_type
-    done;
-  List.rev !list, !len
+    Gwdb.Collection.fold_until
+      (fun (_, len) -> len <= max_answers)
+      (fun acc i -> match_person acc (pget conf base i) search_type)
+      ([], 0)
+      (Gwdb.ipers base)
+  in
+  List.rev list, len
 
 let print_result conf base max_answers (list, len) =
   let list =
@@ -364,15 +364,15 @@ let print_result conf base max_answers (list, len) =
     Wserver.printf "<ul>\n";
     List.iter
       (fun p ->
-         html_li conf;
+         Wserver.printf "<li>" ;
          Perso.print_sosa conf base p true;
-         Wserver.printf "\n%s" (referenced_person_text conf base p);
-         Wserver.printf "%s" (Date.short_dates_text conf base p);
-         Wserver.printf "<em>";
+         Wserver.printf "\n%s%s<em>"
+           (referenced_person_text conf base p)
+           (DateDisplay.short_dates_text conf base p) ;
          specify_homonymous conf base p false;
          Wserver.printf "</em>")
       list;
-    if len > max_answers then begin html_li conf; Wserver.printf "...\n" end;
+    if len > max_answers then Wserver.printf "<li>...</li>";
     Wserver.printf "</ul>\n"
 
 let searching_fields conf =
@@ -410,14 +410,14 @@ let searching_fields conf =
       match getd date_prefix_field_name with
         Some d1, Some d2 ->
           Printf.sprintf "%s %s %s %s %s" search
-            (transl conf "between (date)") (Date.string_of_date conf d1)
-            (transl conf "and") (Date.string_of_date conf d2)
+            (transl conf "between (date)") (DateDisplay.string_of_date conf d1)
+            (transl conf "and") (DateDisplay.string_of_date conf d2)
       | Some d1, _ ->
           Printf.sprintf "%s %s %s" search (transl conf "after (date)")
-            (Date.string_of_date conf d1)
+            (DateDisplay.string_of_date conf d1)
       | _, Some d2 ->
           Printf.sprintf "%s %s %s" search (transl conf "before (date)")
-            (Date.string_of_date conf d2)
+            (DateDisplay.string_of_date conf d2)
       | _ -> search
     in
     if test_string place_prefix_field_name then

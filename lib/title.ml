@@ -20,8 +20,8 @@ let date_interval conf base t x =
   let found = ref false in
   let rec loop t x =
     let set d =
-      if CheckItem.strictly_before_dmy d !d1 then d1 := d;
-      if CheckItem.strictly_after_dmy d !d2 then d2 := d;
+      if Date.compare_dmy d !d1 < 0 then d1 := d;
+      if Date.compare_dmy d !d2 > 0 then d2 := d;
       found := true
     in
     begin match Adef.od_of_cdate (get_birth x) with
@@ -32,7 +32,7 @@ let date_interval conf base t x =
       Some (Dgreg (d, _)) -> set d
     | _ -> ()
     end;
-    begin match CheckItem.date_of_death (get_death x) with
+    begin match Date.date_of_death (get_death x) with
       Some (Dgreg (d, _)) -> set d
     | _ -> if get_death x = NotDead then set conf.today
     end;
@@ -49,12 +49,12 @@ let date_interval conf base t x =
     match t with
       JustSelf -> ()
     | _ ->
-        let u = pget conf base (get_key_index x) in
+        let u = pget conf base (get_iper x) in
         Array.iter
           (fun ifam ->
              let fam = foi base ifam in
              let md = get_marriage fam in
-             let conj = Gutil.spouse (get_key_index x) fam in
+             let conj = Gutil.spouse (get_iper x) fam in
              begin match Adef.od_of_cdate md with
                Some (Dgreg (d, _)) -> set d
              | _ -> ()
@@ -77,23 +77,21 @@ let compare_title_dates conf base (x1, t1) (x2, t2) =
      Adef.od_of_cdate t2.t_date_end, get_death x2)
   with
     (_, Some (Dgreg (d1, _)), _, _), (_, Some (Dgreg (d2, _)), _, _) ->
-      if CheckItem.strictly_before_dmy d1 d2 then -1
-      else if d1.year = d2.year then
-        match
-          Adef.od_of_cdate t1.t_date_end, Adef.od_of_cdate t2.t_date_end
-        with
-          Some d1, Some d2 ->
-            if not (CheckItem.strictly_after d1 d2) then -1 else 1
-        | _ -> -1
-      else 1
-  | (_, _, Some (Dgreg (_, _) as d1), _),
-    (_, _, Some (Dgreg (_, _) as d2), _) ->
-      if not (CheckItem.strictly_before d2 d1) then -1 else 1
+    begin match Date.compare_dmy d1 d2 with
+      | 0 ->
+        begin match Adef.od_of_cdate t1.t_date_end, Adef.od_of_cdate t2.t_date_end with
+          | Some d1, Some d2 -> Date.compare_date d1 d2
+          | _ -> -1
+        end
+      | x -> x
+    end
+  | (_, _, Some (Dgreg (_, _) as d1), _), (_, _, Some (Dgreg (_, _) as d2), _) ->
+    Date.compare_date d1 d2
   | (_, _, _, Death (_, d1)), (_, Some d2, _, _)
-    when not (CheckItem.strictly_before d2 (Adef.date_of_cdate d1)) ->
+    when Date.compare_date (Adef.date_of_cdate d1) d2 <= 0 ->
       -1
   | (_, Some (Dgreg (_, _) as d1), _, _), (_, _, _, Death (_, d2))
-    when not (CheckItem.strictly_before d1 (Adef.date_of_cdate d2)) ->
+    when Date.compare_date d1 (Adef.date_of_cdate d2) > 0 ->
       1
   | _ ->
       match
@@ -101,9 +99,9 @@ let compare_title_dates conf base (x1, t1) (x2, t2) =
         date_interval conf base JustSelf x2
       with
         Some (d11, d12), Some (d21, d22) ->
-          if not (CheckItem.strictly_before_dmy d21 d12) then -1
-          else if not (CheckItem.strictly_before_dmy d11 d22) then 1
-          else if CheckItem.strictly_after_dmy d21 d11 then -1
+          if Date.compare_dmy d12 d21 <= 0 then -1
+          else if Date.compare_dmy d11 d22 >= 0 then 1
+          else if Date.compare_dmy d21 d11 > 0 then -1
           else 1
       | _ ->
           match
@@ -111,9 +109,9 @@ let compare_title_dates conf base (x1, t1) (x2, t2) =
             date_interval conf base AddSpouse x2
           with
             Some (d11, d12), Some (d21, d22) ->
-              if not (CheckItem.strictly_before_dmy d21 d12) then -1
-              else if not (CheckItem.strictly_before_dmy d11 d22) then 1
-              else if not (CheckItem.strictly_before_dmy d22 d12) then -1
+              if Date.compare_dmy d12 d21 <= 0 then -1
+              else if Date.compare_dmy d11 d22 >= 0 then 1
+              else if Date.compare_dmy d22 d12 >= 0 then -1
               else 1
           | _ ->
               match
@@ -121,9 +119,9 @@ let compare_title_dates conf base (x1, t1) (x2, t2) =
                 date_interval conf base AddChildren x2
               with
                 Some (d11, d12), Some (d21, d22) ->
-                  if not (CheckItem.strictly_before_dmy d21 d12) then -1
-                  else if not (CheckItem.strictly_before_dmy d11 d22) then 1
-                  else if not (CheckItem.strictly_before_dmy d22 d12) then -1
+                  if Date.compare_dmy d21 d12 >= 0 then -1
+                  else if Date.compare_dmy d11 d22 >= 0 then 1
+                  else if Date.compare_dmy d22 d12 >= 0 then -1
                   else 1
               | Some _, None -> -1
               | None, Some _ -> 1
@@ -175,10 +173,10 @@ let select_title_place conf base title place =
       list := (x, t) :: !list;
       if not (List.mem tn !all_names) then all_names := tn :: !all_names
   in
-  for i = 0 to nb_of_persons base - 1 do
-    let x = pget conf base (Adef.iper_of_int i) in
+  Gwdb.Collection.iter (fun i ->
+    let x = pget conf base i in
     List.iter (select x) (nobtit conf base x)
-  done;
+    ) (Gwdb.ipers base) ;
   !list, !clean_title, !clean_place, !all_names
 
 let select_all_with_place conf base place =
@@ -189,10 +187,10 @@ let select_all_with_place conf base place =
     if Name.lower (sou base t.t_place) = place then
       begin clean_place := sou base t.t_place; list := (x, t) :: !list end
   in
-  for i = 0 to nb_of_persons base - 1 do
-    let x = pget conf base (Adef.iper_of_int i) in
+  Gwdb.Collection.iter (fun i ->
+    let x = pget conf base i in
     List.iter (select x) (nobtit conf base x)
-  done;
+    ) (Gwdb.ipers base) ;
   !list, !clean_place
 
 let select_title conf base title =
@@ -211,10 +209,10 @@ let select_title conf base title =
         begin clean_name := tn; set := StrSet.add pn !set end;
       if not (List.mem tn !all_names) then all_names := tn :: !all_names
   in
-  for i = 0 to nb_of_persons base - 1 do
-    let x = pget conf base (Adef.iper_of_int i) in
-    List.iter add_place (nobtit conf base x)
-  done;
+  Gwdb.Collection.iter (fun i ->
+      let x = pget conf base i in
+      List.iter add_place (nobtit conf base x)
+    ) (Gwdb.ipers base) ;
   StrSet.elements !set, !clean_name, !all_names
 
 let select_place conf base place =
@@ -228,32 +226,25 @@ let select_place conf base place =
       if not (List.mem tn !list) then
         begin clean_name := pn; list := tn :: !list end
   in
-  for i = 0 to nb_of_persons base - 1 do
-    let x = pget conf base (Adef.iper_of_int i) in
-    List.iter add_title (nobtit conf base x)
-  done;
+  Gwdb.Collection.iter (fun i ->
+      let x = pget conf base i in
+      List.iter add_title (nobtit conf base x)
+    ) (Gwdb.ipers base) ;
   !list, !clean_name
 
 let select_all proj conf base =
-  let s =
-    let rec loop i s =
-      if i = nb_of_persons base then s
-      else
-        let x = pget conf base (Adef.iper_of_int i) in
-        let s =
-          List.fold_left (fun s t -> StrSet.add (sou base (proj t)) s) s
-            (nobtit conf base x)
-        in
-        loop (i + 1) s
-    in
-    loop 0 StrSet.empty
-  in
-  StrSet.elements s
+  Gwdb.Collection.fold (fun acc i ->
+      let x = pget conf base i in
+      List.fold_left
+        (fun s t -> StrSet.add (sou base (proj t)) s) acc
+        (nobtit conf base x)
+    ) StrSet.empty (Gwdb.ipers base)
+  |> StrSet.elements
 
 let select_all2 proj conf base =
   let ht = Hashtbl.create 1 in
-  for i = 0 to nb_of_persons base - 1 do
-    let x = pget conf base (Adef.iper_of_int i) in
+  Gwdb.Collection.iter (fun i ->
+    let x = pget conf base i in
     List.iter
       (fun t ->
          let s = sou base (proj t) in
@@ -263,7 +254,7 @@ let select_all2 proj conf base =
          in
          incr cnt)
       (nobtit conf base x)
-  done;
+    ) (Gwdb.ipers base) ;
   Hashtbl.fold (fun s cnt list -> (s, !cnt) :: list) ht []
 
 let select_all_titles = select_all2 (fun t -> t.t_ident)
@@ -302,7 +293,7 @@ let give_access_someone conf base (x, t) list =
   | _ -> Wserver.printf "%s" (person_text conf base x)
   end;
   Wserver.printf "\n";
-  Wserver.printf "%s" (Date.short_dates_text conf base x);
+  Wserver.printf "%s" (DateDisplay.short_dates_text conf base x);
   if t.t_nth <> 0 then
     Wserver.printf " (%s)"
       (if t.t_nth >= 100 then string_of_int t.t_nth
@@ -341,8 +332,8 @@ let propose_tree_for_list list conf =
       begin let _ =
         List.fold_left
           (fun i (p, n) ->
-             Wserver.printf "&i%d=%d&t%d=%d" i
-               (Adef.int_of_iper (get_key_index p)) i n;
+             Wserver.printf "&i%d=%s&t%d=%d" i
+               (Gwdb.string_of_iper (get_iper p)) i n;
              i + 1)
           1 list
       in
@@ -393,16 +384,12 @@ let print_all_with_place_list conf base p list =
   let title _ = Wserver.printf "... %s\n" p in
   Hutil.header conf title;
   Wserver.printf "<ul>\n";
-  let _ =
-    List.fold_left
-      (fun list (_, t as x) ->
-         html_li conf;
-         give_access_someone conf base x [];
-         Wserver.printf ", %s\n" (sou base t.t_ident);
-         Wserver.printf "\n";
-         fst x :: list)
-      [] list
-  in
+  List.iter
+    (fun ((_, t) as x) ->
+       Wserver.printf "<li>" ;
+       give_access_someone conf base x [];
+       Wserver.printf ", %s<li>" (sou base t.t_ident) )
+    list ;
   Wserver.printf "</ul>\n";
   propose_tree_for_list list conf;
   Hutil.trailer conf

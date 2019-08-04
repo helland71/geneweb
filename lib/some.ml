@@ -191,16 +191,16 @@ let persons_of_fsname conf base base_strings_of_fsname find proj x =
 let print_elem conf base is_surname (p, xl) =
   Mutil.list_iter_first
     (fun first x ->
-       let iper = get_key_index x in
+       let iper = get_iper x in
        if not first then Wserver.printf "</li>\n<li>\n  ";
        Perso.print_sosa conf base x true;
        Wserver.printf "<a href=\"%s%s\" id=\"i%s\">" (commd conf)
-         (acces conf base x) (string_of_int (Adef.int_of_iper iper));
+         (acces conf base x) (string_of_iper iper);
        if is_surname then
          Wserver.printf "%s%s" (surname_without_particle base p) (surname_particle base p)
        else Wserver.printf "%s" (if p = "" then "?" else p);
        Wserver.printf "</a>";
-       Wserver.printf "%s" (Date.short_dates_text conf base x);
+       Wserver.printf "%s" (DateDisplay.short_dates_text conf base x);
        Wserver.printf "<em>";
        specify_homonymous conf base x true;
        Wserver.printf "</em>")
@@ -228,15 +228,14 @@ let first_name_print_list conf base x1 xl liste =
         (fun x1 x2 ->
            match Gutil.alphabetic (p_surname base x1) (p_surname base x2) with
              0 ->
-               begin match
+             begin match
                  Adef.od_of_cdate (get_birth x1),
                  Adef.od_of_cdate (get_birth x2)
                with
-                 Some d1, Some d2 ->
-                   if CheckItem.strictly_after d1 d2 then -1 else 1
+               | Some d1, Some d2 -> Date.compare_date d1 d2
                | Some _, _ -> 1
                | _ -> -1
-               end
+             end
            | n -> -n)
         liste
     in
@@ -285,7 +284,7 @@ let select_first_name conf n list =
   List.iter
     (fun (sstr, (strl, _)) ->
        Wserver.printf "\n";
-       html_li conf;
+       Wserver.printf "<li>" ;
        Wserver.printf "<a href=\"%sm=P&v=%s\">" (commd conf)
          (code_varenv sstr);
        Mutil.list_iter_first
@@ -398,7 +397,7 @@ let print_selection_bullet conf =
 let unselected_bullets conf =
   List.fold_left
     (fun sl (k, v) ->
-       try if k = "u" then int_of_string v :: sl else sl with Failure _ -> sl)
+       try if k = "u" then ifam_of_string v :: sl else sl with Failure _ -> sl)
     [] conf.env
 
 let alphabetic1 n1 n2 = Gutil.alphabetic_utf_8 n1 n2
@@ -408,21 +407,21 @@ type 'a branch_head = { bh_ancestor : 'a; bh_well_named_ancestors : 'a list }
 let print_branch conf base psn name =
   let unsel_list = unselected_bullets conf in
   let rec loop is_first_level p =
-    let u = pget conf base (get_key_index p) in
+    let u = pget conf base (get_iper p) in
     let family_list =
       List.map
         (fun ifam ->
            let fam = foi base ifam in
-           let c = Gutil.spouse (get_key_index p) fam in
+           let c = Gutil.spouse (get_iper p) fam in
            let c = pget conf base c in
            let down = has_children_with_that_name conf base fam name in
            let down =
              if get_sex p = Female && p_surname base c = name then false
              else down
            in
-           let i = Adef.int_of_ifam ifam in
+           let i = ifam in
            let sel = not (List.mem i unsel_list) in
-           fam, c, (if down then Some (string_of_int i, sel) else None))
+           fam, c, (if down then Some (string_of_ifam i, sel) else None))
         (Array.to_list (get_family u))
     in
     let first_select =
@@ -440,7 +439,7 @@ let print_branch conf base psn name =
             person_text_without_surname conf base p
           else person_text conf base p));
     Wserver.printf "</strong>";
-    Wserver.printf "%s" (Date.short_dates_text conf base p);
+    Wserver.printf "%s" (DateDisplay.short_dates_text conf base p);
     Wserver.printf "\n";
     if Array.length (get_family u) = 0 then ()
     else
@@ -465,12 +464,12 @@ let print_branch conf base psn name =
                       else person_text conf base p);
                    Wserver.printf "</em>"
                  end;
-                 Wserver.printf "%s" (Date.short_dates_text conf base p);
+                 Wserver.printf "%s" (DateDisplay.short_dates_text conf base p);
                  Wserver.printf "\n"
                end;
              Wserver.printf "  &amp;";
              Wserver.printf "%s\n"
-               (Date.short_marriage_date_text conf base fam p c);
+               (DateDisplay.short_marriage_date_text conf base fam p c);
              Perso.print_sosa conf base c true;
              Wserver.printf "<strong>";
              Wserver.printf "%s"
@@ -480,7 +479,7 @@ let print_branch conf base psn name =
                      "x"
                    else person_text conf base c));
              Wserver.printf "</strong>";
-             Wserver.printf "%s" (Date.short_dates_text conf base c);
+             Wserver.printf "%s" (DateDisplay.short_dates_text conf base c);
              Wserver.printf "\n";
              let children = get_children fam in
              begin match select with
@@ -540,8 +539,7 @@ let print_one_surname_by_branch conf base x xl (bhl, str) =
           match
             Adef.od_of_cdate (get_birth p1), Adef.od_of_cdate (get_birth p2)
           with
-            Some d1, Some d2 ->
-              if CheckItem.strictly_after d2 d1 then -1 else 1
+          | Some d1, Some d2 -> Date.compare_date d1 d2
           | _, None -> -1
           | None, _ -> 1
         in

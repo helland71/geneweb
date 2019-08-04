@@ -12,8 +12,8 @@ module DataSet =
     (struct
        type t = Gwdb.istr * string * int
        let compare (_, s1, i1) (_, s2, i2) =
-         let comp_s = Pervasives.compare s1 s2 in
-         if comp_s = 0 then Pervasives.compare i1 i2 else comp_s
+         let comp_s = Stdlib.compare s1 s2 in
+         if comp_s = 0 then Stdlib.compare i1 i2 else comp_s
      end)
 
 module PersMap = Map.Make (struct type t = int let compare = compare end)
@@ -22,10 +22,7 @@ module PersSet =
   Set.Make
     (struct
        type t = person
-       let compare p1 p2 =
-         let i1 = Adef.int_of_iper (get_key_index p1) in
-         let i2 = Adef.int_of_iper (get_key_index p2) in
-         Pervasives.compare i1 i2
+       let compare p1 p2 = compare (get_iper p1) (get_iper p2)
      end)
 
 module StringSet = Set.Make (struct type t = string let compare = compare end)
@@ -86,64 +83,52 @@ let get_data conf =
 let get_all_data conf base =
   let data_set = ref DataSet.empty in
   let (data, test_family) = get_data conf in
-  (* Ajoute toutes les "data" liés à un individu *)
-  let rec loop i =
-    if i = nb_of_persons base then ()
-    else
-      let p = pget conf base (Adef.iper_of_int i) in
+  Gwdb.Collection.iter (fun i ->
+      let p = pget conf base i in
       List.iter
         (fun (label, fun_data) ->
            match fun_data with
              Person fun_data ->
-               let istr = fun_data p in
-               if not (is_empty_string istr) then
-                 data_set :=
-                   DataSet.add (istr, label, Hashtbl.hash istr) !data_set
+             let istr = fun_data p in
+             if not (is_empty_string istr) then
+               data_set :=
+                 DataSet.add (istr, label, Hashtbl.hash istr) !data_set
            | Pevent fun_data ->
-               List.iter
-                 (fun evt ->
-                    let istr = fun_data evt in
-                    if not (is_empty_string istr) then
-                      data_set :=
-                        DataSet.add (istr, label, Hashtbl.hash istr)
-                          !data_set)
-                 (get_pevents p)
+             List.iter
+               (fun evt ->
+                  let istr = fun_data evt in
+                  if not (is_empty_string istr) then
+                    data_set :=
+                      DataSet.add (istr, label, Hashtbl.hash istr)
+                        !data_set)
+               (get_pevents p)
            | _ -> ())
-        data;
-      loop (i + 1)
-  in
-  loop 0;
+        data)
+    (Gwdb.ipers base) ;
   (* Ajoute toutes les "data" liés à une famille *)
   if test_family then
-    begin let rec loop i =
-      if i = nb_of_families base then ()
-      else
-        let fam = foi base (Adef.ifam_of_int i) in
-        if is_deleted_family fam then ()
-        else
+    Gwdb.Collection.iter (fun i ->
+        let fam = foi base i in
           List.iter
             (fun (label, fun_data) ->
                match fun_data with
                  Family fun_data ->
-                   let istr = fun_data fam in
-                   if not (is_empty_string istr) then
-                     data_set :=
-                       DataSet.add (istr, label, Hashtbl.hash istr) !data_set
+                 let istr = fun_data fam in
+                 if not (is_empty_string istr) then
+                   data_set :=
+                     DataSet.add (istr, label, Hashtbl.hash istr) !data_set
                | Fevent fun_data ->
-                   List.iter
-                     (fun evt ->
-                        let istr = fun_data evt in
-                        if not (is_empty_string istr) then
-                          data_set :=
-                            DataSet.add (istr, label, Hashtbl.hash istr)
-                              !data_set)
-                     (get_fevents fam)
+                 List.iter
+                   (fun evt ->
+                      let istr = fun_data evt in
+                      if not (is_empty_string istr) then
+                        data_set :=
+                          DataSet.add (istr, label, Hashtbl.hash istr)
+                            !data_set)
+                   (get_fevents fam)
                | _ -> ())
-            data;
-        loop (i + 1)
-    in
-      loop 0
-    end;
+            data)
+      (Gwdb.ifams base) ;
   DataSet.elements !data_set
 
 
@@ -186,10 +171,8 @@ let get_person_from_data conf base =
   in
   (* Parcours tous les individus et ajoute dans la map les    *)
   (* individus en relation avec la "data" donné par la clé k. *)
-  let rec loop i =
-    if i = nb_of_persons base then ()
-    else
-      let p = pget conf base (Adef.iper_of_int i) in
+  Gwdb.Collection.iter (fun i ->
+      let p = pget conf base i in
       List.iter
         (fun (label, fun_data) ->
            match fun_data with
@@ -209,19 +192,13 @@ let get_person_from_data conf base =
                       map_add key istr p)
                  (get_pevents p)
            | _ -> ())
-        data;
-      loop (i + 1)
-  in
-  loop 0;
+        data)
+    (Gwdb.ipers base) ;
   (* Parcours toutes les familles et ajoute dans la map les    *)
   (* individus en relation avec la "data" donnée par la clé k. *)
   if test_family then
-    begin let rec loop i =
-      if i = nb_of_families base then ()
-      else
-        let fam = foi base (Adef.ifam_of_int i) in
-        if is_deleted_family fam then ()
-        else
+    Gwdb.Collection.iter (fun i ->
+        let fam = foi base i in
           List.iter
             (fun (label, fun_data) ->
                match fun_data with
@@ -247,11 +224,8 @@ let get_person_from_data conf base =
                           map_add key istr p)
                      (get_fevents fam)
                | _ -> ())
-            data;
-        loop (i + 1)
-    in
-      loop 0
-    end;
+            data)
+    (Gwdb.ifams base) ;
   (* On retourne la liste des couples ("data", persons list) *)
   let list = ref [] in
   PersMap.iter
@@ -754,8 +728,11 @@ let update_person conf base old new_input p =
       let first_name = get_first_name p in
       let s_first_name = sou base first_name in
       let s_first_name_lower = Name.lower s_first_name in
+      let new_input_lower = Name.lower new_input in
       let (first_name, occ) =
-        if old = s_first_name then
+        if new_input_lower = s_first_name_lower then
+          new_istr, get_occ p
+        else if old = s_first_name then
           new_istr,
           Gutil.find_free_occ base (sou base new_istr)
             (sou base (get_surname p)) 0
@@ -782,8 +759,11 @@ let update_person conf base old new_input p =
       let surname = get_surname p in
       let s_surname = sou base surname in
       let s_surname_lower = Name.lower s_surname in
+      let new_input_lower = Name.lower new_input in
       let (surname, occ) =
-        if old = s_surname then
+        if new_input_lower = s_surname_lower then
+          new_istr, get_occ p
+        else if old = s_surname then
           new_istr,
           Gutil.find_free_occ base (sou base (get_first_name p))
             (sou base new_istr) 0
@@ -903,18 +883,6 @@ let update_person_list conf base new_input list nb_pers max_updates =
             if action = "fn" || action = "sn" then
               begin let pi = np.key_index in
                 let op = poi base pi in
-                let key =
-                  sou base np.first_name ^ " " ^ sou base np.surname
-                in
-                let ofn = p_first_name base op in
-                let osn = p_surname base op in
-                let oocc = get_occ op in
-                delete_key base ofn osn oocc;
-                patch_key base pi (sou base np.first_name)
-                  (sou base np.surname) np.occ;
-                patch_name base key pi;
-                Update.update_misc_names_of_family base (get_sex p)
-                  {family = get_family p};
                 let sp =
                   Futil.map_person_ps (fun ip -> ip)
                     (fun istr -> sou base istr) np
@@ -923,13 +891,13 @@ let update_person_list conf base new_input list nb_pers max_updates =
               end;
             patch_person base np.key_index np;
             if test_family then
-              begin let fam = Array.to_list (get_family p) in
-                List.iter
+              begin
+                Array.iter
                   (fun ifam ->
                      let fam = foi base ifam in
                      let nfam = update_family conf base old new_input fam in
                      patch_family base nfam.fam_index nfam)
-                  fam
+                  (get_family p)
               end;
             (* On met aussi à jour l'historique. *)
             let changed =

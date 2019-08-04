@@ -64,7 +64,7 @@ let make_senv conf base =
           Some ip -> ip
         | None -> Hutil.incorrect_request conf; raise Exit
       in
-      let vi = string_of_int (Adef.int_of_iper ip) in set_senv conf vm vi
+      let vi = string_of_iper ip in set_senv conf vm vi
   | _ -> ()
 
 [@@@ocaml.warning "-45"]
@@ -130,7 +130,6 @@ let family_m conf base =
       | "LINKED" -> handler.linked
       | "LL" -> handler.ll
       | "LM" -> handler.lm
-      | "LEX" -> handler.lex
       | "MISC_NOTES" -> handler.misc_notes
       | "MISC_NOTES_SEARCH" -> handler.misc_notes_search
       | "MOD_DATA" -> handler.mod_data
@@ -188,7 +187,6 @@ let family_m conf base =
         begin match mode with
           | "API_ALL_PERSONS" -> handler.api_all_persons
           | "API_ALL_FAMILIES" -> handler.api_all_families
-          | "API_ANNIVERSARY" -> handler.api_anniversary
           | "API_BASE_WARNINGS" -> handler.api_base_warnings
           | "API_CLOSE_PERSONS" -> handler.api_close_persons
           | "API_CPL_REL" -> handler.api_cpl_rel
@@ -212,10 +210,6 @@ let family_m conf base =
           | "API_MAX_ANCESTORS" -> handler.api_max_ancestors
           | "API_NB_ANCESTORS" -> handler.api_nb_ancestors
           | "API_NOTIFICATION_BIRTHDAY" -> handler.api_notification_birthday
-          | "API_PRINT_INDEX" -> handler.api_print_index
-          | "API_PRINT_EXPORT" -> handler.api_print_export
-          | "API_PRINT_EXPORT_SEARCH" -> handler.api_print_export_search
-          | "API_PRINT_SYNCHRO" -> handler.api_print_synchro
           | "API_REF_PERSON_FROM_ID" -> handler.api_ref_person_from_id
           | "API_REMOVE_IMAGE_EXT" -> handler.api_remove_image_ext
           | "API_REMOVE_IMAGE_EXT_ALL" -> handler.api_remove_image_ext_all
@@ -247,7 +241,8 @@ let family_m conf base =
           | "API_DEL_PERSON_OK" -> handler.api_del_person_ok
           | "API_LINK_TREE" -> handler.api_link_tree
           | "API_STATS" -> handler.api_stats
-          | _ -> handler.incorrect_request
+          | "API_SELECT_EVENTS" -> handler.api_select_events
+          | unknown -> handler.fallback unknown
         end
 #endif
       | unknown -> handler.fallback unknown
@@ -286,7 +281,7 @@ let extract_henv conf base =
           ["pz", code_varenv (Name.lower first_name);
            "nz", code_varenv (Name.lower surname);
            "ocz", string_of_int (get_occ p)]
-        else ["iz", string_of_int (Adef.int_of_iper (get_key_index p))]
+        else ["iz", string_of_iper (get_iper p)]
       in
       conf.henv <- conf.henv @ x
   | None -> ()
@@ -331,13 +326,15 @@ let extract_henv conf base =
 
 let set_owner conf =
   if Sys.unix then
-    let s = Unix.stat (Util.base_path [] (conf.bname ^ ".gwb")) in
-    try Unix.setgid s.Unix.st_gid; Unix.setuid s.Unix.st_uid with
+    try
+      let s = Unix.stat (Util.base_path [] (conf.bname ^ ".gwb")) in
+      Unix.setgid s.Unix.st_gid ;
+      Unix.setuid s.Unix.st_uid
+    with
       Unix.Unix_error (_, _, _) -> ()
 
-let thousand oc x = Sosa.print (output_string oc) "," (Sosa.of_int x)
-
 let log_count r =
+  let thousand oc x = output_string oc @@ Mutil.string_of_int_sep ","  x in
   match r with
     Some (welcome_cnt, request_cnt, start_date) ->
       Log.with_log
@@ -371,7 +368,7 @@ let print_no_index conf base =
   let link = url_no_index conf base in
   Hutil.header conf title;
   Wserver.printf "<ul>\n";
-  html_li conf;
+  Wserver.printf "<li>" ;
   Wserver.printf "<a href=\"http://%s\">\n" link;
   Wserver.printf "%s" link;
   Wserver.printf "</a>\n";
@@ -402,7 +399,7 @@ let treat_request conf base =
       make_senv conf base;
       let conf =
         match Util.default_sosa_ref conf base with
-          Some p -> {conf with default_sosa_ref = get_key_index p, Some p}
+          Some p -> {conf with default_sosa_ref = get_iper p, Some p}
         | None -> conf
       in
       if only_special_env conf.env then
@@ -444,7 +441,7 @@ let treat_request_on_possibly_locked_base conf bfile =
       in
       Hutil.rheader conf title;
       Wserver.printf "<ul>";
-      Util.html_li conf;
+      Wserver.printf "<li>" ;
       Wserver.printf "%s" (Util.capitale (transl conf "cannot access base"));
       Wserver.printf " \"%s\".</ul>\n" conf.bname;
       begin match e with

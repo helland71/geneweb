@@ -193,9 +193,7 @@ let notes_links_db conf base eliminate_unlinked =
              NotesLinks.PgInd ip ->
                authorized_age conf base (pget conf base ip)
            | NotesLinks.PgFam ifam ->
-               let fam = foi base ifam in
-               if is_deleted_family fam then false
-               else authorized_age conf base (pget conf base (get_father fam))
+               authorized_age conf base (pget conf base (get_father @@ foi base ifam))
            | NotesLinks.PgNotes | NotesLinks.PgMisc _ |
              NotesLinks.PgWizard _ ->
                true
@@ -261,8 +259,8 @@ let print_linked_list conf base pgl =
            Wserver.printf "<tt>";
            if conf.wizard then
              begin
-               Wserver.printf "<a class=\"mx-2\" href=\"%s&i=%d&\">"
-                 (commd conf) (Adef.int_of_iper ip);
+               Wserver.printf "<a class=\"mx-2\" href=\"%s&i=%s&\">"
+                 (commd conf) (Gwdb.string_of_iper ip);
                Wserver.printf "</sup><i class=\"fa fa-cog\"></i></sup>";
                Wserver.printf "</a>"
              end;
@@ -271,7 +269,7 @@ let print_linked_list conf base pgl =
              Wserver.printf "<span class=\"mx-2\">";
              Wserver.printf "%s%s"
                (Util.referenced_person_title_text conf base p)
-               (Date.short_dates_text conf base p);
+               (DateDisplay.short_dates_text conf base p);
              Wserver.printf "</span>"
            end;
            Wserver.printf "</tt>\n"
@@ -283,18 +281,18 @@ let print_linked_list conf base pgl =
            if conf.wizard then
              begin
                Wserver.printf
-                 "<a class=\"mx-2\" href=\"%sm=MOD_FAM&i=%d&ip=%d&\">"
-                 (commd conf) (Adef.int_of_ifam ifam)
-                 (Adef.int_of_iper (Gwdb.get_key_index fath));
+                 "<a class=\"mx-2\" href=\"%sm=MOD_FAM&i=%s&ip=%s&\">"
+                 (commd conf) (Gwdb.string_of_ifam ifam)
+                 (Gwdb.string_of_iper (Gwdb.get_iper fath));
                Wserver.printf "</sup><i class=\"fa fa-cog\"></i></sup>";
                Wserver.printf "</a>"
              end;
            Wserver.printf "<span class=\"mx-2\">";
            Wserver.printf "%s%s &amp; %s %s"
              (Util.referenced_person_title_text conf base fath)
-             (Date.short_dates_text conf base fath)
+             (DateDisplay.short_dates_text conf base fath)
              (Util.referenced_person_title_text conf base moth)
-             (Date.short_dates_text conf base moth);
+             (DateDisplay.short_dates_text conf base moth);
            Wserver.printf "</span>";
            Wserver.printf "</tt>\n"
        | NotesLinks.PgNotes ->
@@ -447,9 +445,7 @@ let commit_notes conf base fnotes s =
       [base_notes_dir base; fname]
   in
   Mutil.mkdir_p (Filename.dirname fpath);
-  begin try Gwdb.commit_notes base fname s with
-    Sys_error _ -> Hutil.incorrect_request conf; raise Update.ModErr
-  end;
+  Gwdb.commit_notes base fname s ;
   History.record conf base (Def.U_Notes (p_getint conf.env "v", fnotes)) "mn";
   update_notes_links_db conf pg s
 

@@ -5,7 +5,7 @@ open Def
 open Gwdb
 
 type base_error = person error
-type base_warning = (person, family, title, pers_event, fam_event) warning
+type base_warning = (iper, person, ifam, family, title, pers_event, fam_event) warning
 type base_misc = (person, family, title) misc
 
 (* Constants used for computing the warnings. *)
@@ -22,140 +22,23 @@ let lim_date_marriage = 1850
 let min_age_marriage = 13
 let average_marriage_age = 20
 
-
-let common_prec p1 p2 =
-  if p1 = p2 then p1
-  else
-    match p1, p2 with
-      Sure, _ -> p2
-    | _, Sure -> p1
-    | _ -> Maybe
-
-let leap_year a = if a mod 100 = 0 then a / 100 mod 4 = 0 else a mod 4 = 0
-
-let nb_days_in_month =
-  let tb = [| 31; 28; 31; 30; 31; 30; 31; 31; 30; 31; 30; 31 |] in
-  fun m a ->
-    if m = 2 && leap_year a then 29
-    else if m >= 1 && m <= 12 then tb.(m-1)
-    else 0
-
-let time_elapsed d1 d2 =
-  let prec = common_prec d1.prec d2.prec in
-  match d1 with
-    {day = 0; month = 0; year = a1} ->
-      {day = 0; month = 0; year = d2.year - a1; prec = prec; delta = 0}
-  | {day = 0; month = m1; year = a1} ->
-      begin match d2 with
-        {day = 0; month = 0; year = a2} ->
-          {day = 0; month = 0; year = a2 - a1; prec = prec; delta = 0}
-      | {day = 0; month = m2; year = a2} ->
-          let r = 0 in
-          let (month, r) =
-            if m1 + r <= m2 then m2 - m1 - r, 0 else m2 - m1 - r + 12, 1
-          in
-          let year = a2 - a1 - r in
-          {day = 0; month = month; year = year; prec = prec; delta = 0}
-      | {month = m2; year = a2} ->
-          let r = 0 in
-          let (month, r) =
-            if m1 + r <= m2 then m2 - m1 - r, 0 else m2 - m1 - r + 12, 1
-          in
-          let year = a2 - a1 - r in
-          {day = 0; month = month; year = year; prec = prec; delta = 0}
-      end
-  | {day = j1; month = m1; year = a1} ->
-      match d2 with
-        {day = 0; month = 0; year = a2} ->
-          {day = 0; month = 0; year = a2 - a1; prec = prec; delta = 0}
-      | {day = 0; month = m2; year = a2} ->
-          let r = 0 in
-          let (month, r) =
-            if m1 + r <= m2 then m2 - m1 - r, 0 else m2 - m1 - r + 12, 1
-          in
-          let year = a2 - a1 - r in
-          {day = 0; month = month; year = year; prec = prec; delta = 0}
-      | {day = j2; month = m2; year = a2} ->
-          let (day, r) =
-            if j1 <= j2 then j2 - j1, 0
-            else j2 - j1 + nb_days_in_month m1 a1, 1
-          in
-          let (month, r) =
-            if m1 + r <= m2 then m2 - m1 - r, 0 else m2 - m1 - r + 12, 1
-          in
-          let year = a2 - a1 - r in
-          {day = day; month = month; year = year; prec = prec; delta = 0}
-
-let strictly_before_dmy d1 d2 =
-  let {day = d; month = m; year = y} = time_elapsed d2 d1 in
-  if y < 0 then true
-  else if y > 0 then false
-  else if m < 0 then true
-  else if m > 0 then false
-  else if d < 0 then true
-  else if d > 0 then false
-  else if d1.prec = d2.prec then false
-  else if d1.prec = Before && d2.prec = After then true
-  else false
-
 let strictly_before d1 d2 =
   match d1, d2 with
-    Dgreg (d1, _), Dgreg (d2, _) -> strictly_before_dmy d1 d2
+  | Dgreg (d1, _), Dgreg (d2, _) ->
+    begin
+      try Date.compare_dmy ~strict:true d1 d2 < 0
+      with Date.Not_comparable -> false
+    end
   | _ -> false
-
-let strictly_after_dmy d1 d2 =
-  let {day = d; month = m; year = y} = time_elapsed d1 d2 in
-  if y < 0 then true
-  else if y > 0 then false
-  else if m < 0 then true
-  else if m > 0 then false
-  else if d < 0 then true
-  else if d > 0 then false
-  else if d2.prec = d1.prec then false
-  else if d2.prec = Before && d1.prec = After then true
-  else false
 
 let strictly_after d1 d2 =
   match d1, d2 with
-    Dgreg (d1, _), Dgreg (d2, _) -> strictly_after_dmy d1 d2
+  | Dgreg (d1, _), Dgreg (d2, _) ->
+    begin
+      try Date.compare_dmy ~strict:true d1 d2 > 0
+      with Date.Not_comparable -> false
+    end
   | _ -> false
-
-(* ********************************************************************** *)
-(*  [Fonc] compare_date : date -> date -> int                             *)
-(** [Description] : Fonction de comparaison de deux dates. On ne tiens
-                    pas compte de la précision de la date. (Fonction
-                    identique à Date.ml)
-    [Args] :
-      - d1 : la première date
-      - d2 : la deuxième date
-    [Retour] : int
-    [Rem] : Non exporté en clair hors de ce module.                       *)
-(* ********************************************************************** *)
-let compare_date d1 d2 =
-  match d1, d2 with
-    Dgreg (dmy1, _), Dgreg (dmy2, _) ->
-      begin match Pervasives.compare dmy1.year dmy2.year with
-        0 ->
-          begin match Pervasives.compare dmy1.month dmy2.month with
-            0 ->
-              (* Si l'une des deux dates n'est pas complète (mois ou jour *)
-              (* égal à zéro), alors on ne distingue pas les deux dates.  *)
-              if dmy1.day = 0 || dmy2.day = 0 then 0
-              else Pervasives.compare dmy1.day dmy2.day
-          | x ->
-              (* Idem ci-dessus. *)
-              if dmy1.month = 0 || dmy2.month = 0 then 0 else x
-          end
-      | x -> x
-      end
-  | Dgreg (_, _), Dtext _ -> 1
-  | Dtext _, Dgreg (_, _) -> -1
-  | Dtext _, Dtext _ -> 0
-
-let date_of_death =
-  function
-    Death (_, cd) -> Some (Adef.date_of_cdate cd)
-  | _ -> None
 
 type 'string event_name =
     Psort of 'string gen_pers_event_name
@@ -173,16 +56,18 @@ let compare_event_name name1 name2 =
   match name1, name2 with
     Psort Epers_Birth, _ -> -1
   | _, Psort Epers_Birth -> 1
-  | Psort Epers_Baptism, e
-    when
-      e = Psort Epers_Death || e = Psort Epers_Funeral ||
-      e = Psort Epers_Burial || e = Psort Epers_Cremation ->
-      -1
-  | e, Psort Epers_Baptism
-    when
-      e = Psort Epers_Death || e = Psort Epers_Funeral ||
-      e = Psort Epers_Burial || e = Psort Epers_Cremation ->
-      1
+  | Psort Epers_Baptism
+  , ( Psort Epers_Death
+    | Psort Epers_Funeral
+    | Psort Epers_Burial
+    | Psort Epers_Cremation ) ->
+    -1
+  | ( Psort Epers_Death
+    | Psort Epers_Funeral
+    | Psort Epers_Burial
+    | Psort Epers_Cremation )
+  , Psort Epers_Baptism ->
+    1
   | Psort Epers_Burial, _ | Psort Epers_Cremation, _ -> 1
   | _, Psort Epers_Burial | _, Psort Epers_Cremation -> -1
   | Psort Epers_Funeral, _ -> 1
@@ -203,15 +88,15 @@ let compare_event_date_prec d1 d2 =
 let compare_event_date d1 d2 =
   match d1, d2 with
     Dgreg (dmy1, _), Dgreg (dmy2, _) ->
-      begin match Pervasives.compare dmy1.year dmy2.year with
+      begin match Stdlib.compare dmy1.year dmy2.year with
         0 ->
-          begin match Pervasives.compare dmy1.month dmy2.month with
+          begin match Stdlib.compare dmy1.month dmy2.month with
             0 ->
               (* Si l'une des deux dates n'est pas complète (mois ou jour *)
               (* égal à zéro), alors on ne distingue pas les deux dates.  *)
               if dmy1.day = 0 || dmy2.day = 0 then 0
               else
-                begin match Pervasives.compare dmy1.day dmy2.day with
+                begin match Stdlib.compare dmy1.day dmy2.day with
                   0 -> compare_event_date_prec dmy1 dmy2
                 | x -> x
                 end
@@ -234,16 +119,16 @@ let cmp_events (get_name, get_date) e1 e2 =
       else comp_date
   | _ -> compare_event_name (get_name e1) (get_name e2)
 
-let sort_events (get_name, get_date) events =
+let sort_events get_name get_date events =
   List.stable_sort (fun e1 e2 -> cmp_events (get_name, get_date) e1 e2) events
 
-let merge_events (get_name, get_date) l1 l2 =
+let merge_events get_name get_date l1 l2 =
   List.merge (fun e1 e2 -> cmp_events (get_name, get_date) e1 e2) l1 l2
 
 let sort_pevents warning p =
   let a =
     sort_events
-      ((fun evt -> Psort evt.epers_name), (fun evt -> evt.epers_date))
+      (fun evt -> Psort evt.epers_name) (fun evt -> evt.epers_date)
       (get_pevents p)
   in
   let b = get_pevents p in
@@ -251,7 +136,7 @@ let sort_pevents warning p =
 
 let sort_fevents warning (ifam, fam) =
   let a =
-    sort_events ((fun evt -> Fsort evt.efam_name), (fun evt -> evt.efam_date))
+    sort_events (fun evt -> Fsort evt.efam_name) (fun evt -> evt.efam_date)
       (get_fevents fam)
   in
   let b = get_fevents fam in
@@ -308,9 +193,9 @@ let check_person_age base warning p =
     | _ -> false
   in
   if is_dead then
-    match first_found_date, date_of_death (get_death p) with
+    match first_found_date, Date.date_of_death (get_death p) with
       Some d1, Some (Dgreg (d2, _)) ->
-        let a = time_elapsed d1 d2 in
+        let a = Date.time_elapsed d1 d2 in
         if d2.year > lim_date_death then
           (if a.year > max_death_after_lim_date_death then
              warning (DeadOld (p, a)))
@@ -319,7 +204,7 @@ let check_person_age base warning p =
     | _ -> ()
 
 let try_to_fix_relation_sex base warning p_ref =
-  let p_index = Some (get_key_index p_ref) in
+  let p_index = Some (get_iper p_ref) in
   let fixed = ref 0 in
   let not_fixed = ref 0 in
   let changed_related =
@@ -384,7 +269,7 @@ let try_to_fix_relation_sex base warning p_ref =
   if !fixed > 0 then Some changed_related else None
 
 let related_sex_is_coherent base warning p_ref =
-  let p_index = Some (get_key_index p_ref) in
+  let p_index = Some (get_iper p_ref) in
   let merge_sex g1 g2 =
     match g1, g2 with
       Some Male, Some Male -> Some Male
@@ -411,7 +296,7 @@ let related_sex_is_coherent base warning p_ref =
   match new_sex with
     Some g ->
       if get_sex p_ref != g then
-        Some [get_key_index p_ref, p_ref, Some g, None]
+        Some [get_iper p_ref, p_ref, Some g, None]
       else None
   | None -> try_to_fix_relation_sex base warning p_ref
 
@@ -428,7 +313,7 @@ let check_difference_age_between_cpl base warning ifath imoth =
   in
   match find_date fath, find_date moth with
     Some d1, Some d2 ->
-      let a = time_elapsed d1 d2 in
+      let a = Date.time_elapsed d1 d2 in
       if a.year > max_age_btw_cpl then
         warning (BigAgeBetweenSpouses (fath, moth, a))
   | _ -> ()
@@ -446,9 +331,9 @@ let check_normal_marriage_date_for_someone base warning witn fam ip =
             else warning (MarriageDateBeforeBirth p)
           else if
             not witn && year_of g2 > lim_date_marriage &&
-            year_of (time_elapsed g1 g2) < min_age_marriage
+            year_of (Date.time_elapsed g1 g2) < min_age_marriage
           then
-            warning (YoungForMarriage (p, time_elapsed g1 g2))
+            warning (YoungForMarriage (p, Date.time_elapsed g1 g2))
       | _ -> ()
       end;
       begin match get_death p with
@@ -644,7 +529,7 @@ let check_marriages_order base warning p =
          let max_date =
            match date, max_date with
              Some d1, Some d2 ->
-               if compare_date d1 d2 = 1 then Some d1 else Some d2
+               if Date.compare_date d1 d2 = 1 then Some d1 else Some d2
            | Some d1, None -> Some d1
            | _ -> max_date
          in
@@ -654,7 +539,7 @@ let check_marriages_order base warning p =
   Array.stable_sort
     (fun (_f1, d1) (_f2, d2) ->
        match d1, d2 with
-         Some d1, Some d2 -> compare_date d1 d2
+         Some d1, Some d2 -> Date.compare_date d1 d2
        | _ -> 0)
     a;
   let a = Array.map (fun (f, _) -> f) a in
@@ -674,7 +559,7 @@ let close_siblings warning x np ifam des =
   | Some (elder, d1), Some d2 ->
       begin match d1, d2 with
         Dgreg (d1, _), Dgreg (d2, _) ->
-          let d = time_elapsed d1 d2 in
+          let d = Date.time_elapsed d1 d2 in
           (* On vérifie les jumeaux ou naissances proches. *)
           if d.year = 0 && d.month = 0 && d.day < max_days_btw_sibl then ()
           else if d.year = 0 && d.month < max_month_btw_sibl then
@@ -699,12 +584,12 @@ let child_born_after_his_parent base warning x iparent =
   let parent = poi base iparent in
   match
     Adef.od_of_cdate (get_birth parent), Adef.od_of_cdate (get_birth x),
-    date_of_death (get_death x)
+    Date.date_of_death (get_death x)
   with
     Some (Dgreg (g1, _) as d1), Some (Dgreg (g2, _) as d2), _ ->
       if strictly_after d1 d2 then warning (ParentBornAfterChild (parent, x))
       else
-        let a = time_elapsed g1 g2 in
+        let a = Date.time_elapsed g1 g2 in
         if year_of a < min_parent_age then
           warning (ParentTooYoung (parent, a))
         else if
@@ -715,7 +600,7 @@ let child_born_after_his_parent base warning x iparent =
   | Some (Dgreg (g1, _) as d1), _, Some (Dgreg (g2, _) as d2) ->
       if strictly_after d1 d2 then warning (ParentBornAfterChild (parent, x))
       else
-        let a = time_elapsed g1 g2 in
+        let a = Date.time_elapsed g1 g2 in
         if year_of a < min_parent_age then
           warning (ParentTooYoung (parent, a))
   | _ -> ()
@@ -731,7 +616,7 @@ let child_born_before_mother_death base warning x imoth =
 
 let possible_father base warning x ifath =
   let father = poi base ifath in
-  match Adef.od_of_cdate (get_birth x), date_of_death (get_death father) with
+  match Adef.od_of_cdate (get_birth x), Date.date_of_death (get_death father) with
     Some (Dgreg ({prec = Before}, _)), _ |
     _, Some (Dgreg ({prec = After}, _)) ->
       ()
@@ -749,7 +634,7 @@ let child_has_sex warning child =
   if get_sex child = Neuter then warning (UndefinedSex child)
 
 let check_order_pfevents get_name get_date warning p events =
-  let events = sort_events (get_name, get_date) events in
+  let events = sort_events get_name get_date events in
   let rec loop = function
     | e1 :: e2 :: events ->
       if compare_event_name (get_name e1) (get_name e2) = 1
@@ -792,7 +677,8 @@ let check_witness_pevents base warning p =
     (get_pevents p)
 
 let check_pevents base warning p =
-  check_order_pevents warning p; check_witness_pevents base warning p
+  check_order_pevents warning p ;
+  check_witness_pevents base warning p
 
 (* ************************************************************************* *)
 (*  [Fonc] check_children :
@@ -912,9 +798,9 @@ let check_marriage_age base warning (_ifam, fam) ip =
                 begin match Adef.od_of_cdate (get_birth p) with
                   Some (Dgreg (g1, _)) ->
                     if year_of g2 > lim_date_marriage &&
-                       year_of (time_elapsed g1 g2) < min_age_marriage
+                       year_of (Date.time_elapsed g1 g2) < min_age_marriage
                     then
-                      warning (YoungForMarriage (p, time_elapsed g1 g2))
+                      warning (YoungForMarriage (p, Date.time_elapsed g1 g2))
                     else loop l
                 | _ -> loop l
                 end

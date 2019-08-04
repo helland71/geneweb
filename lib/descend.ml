@@ -48,33 +48,32 @@ let descendants_title conf base p h =
 let display_descendants_level conf base max_level ancestor =
   let max_level = min (Perso.limit_desc conf) max_level in
   let (levt, _) = Perso.make_desc_level_table conf base max_level ancestor in
-  let mark = Array.make (Array.length levt) false in
+  let mark = Gwdb.iper_marker (Gwdb.ipers base) false in
   let rec get_level level u list =
-    List.fold_left
+    Array.fold_left
       (fun list ifam ->
          let des = foi base ifam in
          let enfants = get_children des in
-         List.fold_left
+         Array.fold_left
            (fun list ix ->
               let x = pget conf base ix in
-              if mark.(Adef.int_of_iper ix) then list
+              if Gwdb.Marker.get mark ix then list
               else
-                let _ = mark.(Adef.int_of_iper ix) <- true in
-                if levt.(Adef.int_of_iper ix) > max_level then list
+                let _ = Gwdb.Marker.set mark ix true in
+                if Gwdb.Marker.get levt ix > max_level then list
                 else if level = max_level then
-                  if p_first_name base x = "x" ||
-                     levt.(Adef.int_of_iper ix) != level
-                  then
-                    list
+                  if p_first_name base x = "x"
+                  || Gwdb.Marker.get levt ix != level
+                  then list
                   else x :: list
                 else if level < max_level then
                   get_level (succ level) (pget conf base ix) list
                 else list)
-           list (Array.to_list enfants))
-      list (Array.to_list (get_family u))
+           list enfants)
+      list (get_family u)
   in
   let len = ref 0 in
-  let list = get_level 1 (pget conf base (get_key_index ancestor)) [] in
+  let list = get_level 1 (pget conf base (get_iper ancestor)) [] in
   let list =
     List.sort
       (fun p1 p2 ->
@@ -89,7 +88,7 @@ let display_descendants_level conf base max_level ancestor =
     List.fold_left
       (fun pl p ->
          match pl with
-           (p1, n) :: pl when get_key_index p = get_key_index p1 ->
+           (p1, n) :: pl when get_iper p = get_iper p1 ->
              (p1, succ n) :: pl
          | _ -> incr len; (p, 1) :: pl)
       [] list
@@ -100,14 +99,14 @@ let display_descendants_level conf base max_level ancestor =
     Wserver.printf " (%d %s)" !len
       (Util.translate_eval ("@(c)" ^ transl_nth conf "person/persons" 1));
   Wserver.printf ".\n";
-  html_p conf;
+  Wserver.printf "<p>" ;
   print_alphab_list
     (fun (p, _) ->
        if is_hidden p then "?"
        else String.sub (p_surname base p) (Mutil.initial (p_surname base p)) 1)
     (fun (p, c) ->
        Wserver.printf "\n%s" (referenced_person_title_text conf base p);
-       Wserver.printf "%s" (Date.short_dates_text conf base p);
+       Wserver.printf "%s" (DateDisplay.short_dates_text conf base p);
        if not (is_hidden p) && c > 1 then Wserver.printf " <em>(%d)</em>" c;
        Wserver.printf "\n")
     list;
@@ -119,7 +118,7 @@ let mark_descendants conf base marks max_lev ip =
   let rec loop lev ip u =
     if lev <= max_lev then
       begin
-        marks.(Adef.int_of_iper ip) <- true;
+        Gwdb.Marker.set marks ip true ;
         Array.iter
           (fun ifam ->
              let el = get_children (foi base ifam) in
@@ -132,25 +131,22 @@ let mark_descendants conf base marks max_lev ip =
 let label_descendants conf base marks paths max_lev =
   let rec loop path lev p =
     if lev < max_lev then
-      let u = p in
-      let _ =
-        List.fold_left
-          (fun cnt ifam ->
-             let fam = foi base ifam in
-             let c = Gutil.spouse (get_key_index p) fam in
-             let el = get_children fam in
-             List.fold_left
-               (fun cnt e ->
-                  if get_sex p = Male || not marks.(Adef.int_of_iper c) then
-                    begin let path = Char.chr (Char.code 'A' + cnt) :: path in
-                      paths.(Adef.int_of_iper e) <- path;
-                      loop path (succ lev) (pget conf base e)
-                    end;
-                  succ cnt)
-               cnt (Array.to_list el))
-          0 (Array.to_list (get_family u))
-      in
-      ()
+      ignore @@
+      Array.fold_left
+        (fun cnt ifam ->
+           let fam = foi base ifam in
+           let c = Gutil.spouse (get_iper p) fam in
+           let el = get_children fam in
+           Array.fold_left
+             (fun cnt e ->
+                if get_sex p = Male || not (Gwdb.Marker.get marks c) then
+                  begin let path = Char.chr (Char.code 'A' + cnt) :: path in
+                    Gwdb.Marker.set paths e path ;
+                    loop path (succ lev) (pget conf base e)
+                  end;
+                succ cnt)
+             cnt el)
+        0 (get_family p)
   in
   loop [] 0
 
@@ -160,19 +156,17 @@ let close_to_end conf base marks max_lev lev p =
   if lev + close_lev >= max_lev then true
   else
     let rec short dlev p =
-      let u = p in
-      List.for_all
+      Array.for_all
         (fun ifam ->
            let fam = foi base ifam in
-           let c = Gutil.spouse (get_key_index p) fam in
+           let c = Gutil.spouse (get_iper p) fam in
            let el = get_children fam in
-           if get_sex p = Male || not marks.(Adef.int_of_iper c) then
+           if get_sex p = Male || not (Gwdb.Marker.get marks c) then
              if dlev = close_lev then Array.length el = 0
              else
-               List.for_all (fun e -> short (succ dlev) (pget conf base e))
-                 (Array.to_list el)
+               Array.for_all (fun e -> short (succ dlev) (pget conf base e)) el
            else true)
-        (Array.to_list (get_family u))
+        (get_family p)
     in
     short 1 p
 
@@ -184,22 +178,21 @@ let labelled conf base marks max_lev lev ip =
      Some ifam ->
      let fam = foi base ifam in
      let el = get_children fam in
-     List.exists
+     Array.exists
        (fun ie ->
           let e = pget conf base ie in
           let u = e in
           Array.length (get_family u) <> 0 &&
           not (close_to_end conf base marks max_lev lev e))
-       (Array.to_list el)
+       el
    | _ -> false)
 
 let label_of_path paths p =
-  let rec loop =
-    function
-      [] -> ""
+  let rec loop = function
+    | [] -> ""
     | c :: cl -> loop cl ^ String.make 1 c
   in
-  loop paths.(Adef.int_of_iper (get_key_index p))
+  loop @@ Gwdb.Marker.get paths (get_iper p)
 
 let print_child conf base p1 p2 e =
   Wserver.printf "<strong>";
@@ -209,7 +202,7 @@ let print_child conf base p1 p2 e =
     Wserver.printf "%s" (referenced_person_text_without_surname conf base e)
   else Wserver.printf "\n%s" (referenced_person_text conf base e);
   Wserver.printf "</strong>";
-  Wserver.printf "%s" (Date.short_dates_text conf base e)
+  Wserver.printf "%s" (DateDisplay.short_dates_text conf base e)
 
 let print_repeat_child conf base p1 p2 e =
   Wserver.printf "<em>";
@@ -222,160 +215,150 @@ let print_repeat_child conf base p1 p2 e =
 
 let display_spouse conf base marks paths fam p c =
   Wserver.printf "\n&amp;";
-  Wserver.printf "%s" (Date.short_marriage_date_text conf base fam p c);
+  Wserver.printf "%s" (DateDisplay.short_marriage_date_text conf base fam p c);
   Wserver.printf " ";
   Wserver.printf "<strong>";
   Wserver.printf "\n%s" (referenced_person_text conf base c);
   Wserver.printf "</strong>";
-  if marks.(Adef.int_of_iper (get_key_index c)) then
-    Wserver.printf " (<tt><b>%s</b></tt>)" (label_of_path paths c)
-  else Wserver.printf "%s" (Date.short_dates_text conf base c)
+  if Gwdb.Marker.get marks (get_iper c)
+  then Wserver.printf " (<tt><b>%s</b></tt>)" (label_of_path paths c)
+  else Wserver.printf "%s" (DateDisplay.short_dates_text conf base c)
 
 let total = ref 0
 
 let print_family_locally conf base marks paths max_lev lev p1 c1 e =
   let rec loop lev p =
     if lev < max_lev then
-      let _ =
-        List.fold_left
-          (fun (cnt, first, need_br) ifam ->
-             let fam = foi base ifam in
-             let c = Gutil.spouse (get_key_index p) fam in
-             let el = get_children fam in
-             let c = pget conf base c in
-             if need_br then html_br conf;
-             if not first then print_repeat_child conf base p1 c1 p;
-             display_spouse conf base marks paths fam p c;
-             Wserver.printf "\n";
-             let print_children =
-               get_sex p = Male ||
-               not marks.(Adef.int_of_iper (get_key_index c))
-             in
-             if print_children then
-               Wserver.printf "<ol start=\"%d\">\n" (succ cnt);
-             let cnt =
-               List.fold_left
-                 (fun cnt ie ->
-                    let e = pget conf base ie in
-                    if print_children then
-                      begin
-                        Wserver.printf "<li type=\"A\"> ";
-                        print_child conf base p c e;
-                        Wserver.printf "\n";
-                        incr total;
-                        if succ lev = max_lev then
-                          Mutil.list_iter_first
-                            (fun first ifam ->
-                               let fam = foi base ifam in
-                               let c1 = Gutil.spouse ie fam in
-                               let el = get_children fam in
-                               let c1 = pget conf base c1 in
-                               if not first then
-                                 begin
-                                   html_br conf;
-                                   print_repeat_child conf base p c e
-                                 end;
-                               display_spouse conf base marks paths fam e c1;
-                               if Array.length el <> 0 then
-                                 Wserver.printf ".....";
-                               Wserver.printf "\n")
-                            (Array.to_list (get_family (pget conf base ie)))
-                        else loop (succ lev) e
-                      end;
-                    succ cnt)
-                 cnt (Array.to_list el)
-             in
-             if print_children then Wserver.printf "</ol>\n";
-             cnt, false, not print_children)
-          (0, true, false) (Array.to_list (get_family p))
-      in
-      ()
+      ignore @@
+      Array.fold_left
+        begin fun (cnt, first, need_br) ifam ->
+          let fam = foi base ifam in
+          let c = Gutil.spouse (get_iper p) fam in
+          let el = get_children fam in
+          let c = pget conf base c in
+          if need_br then Wserver.printf "<br>" ;
+          if not first then print_repeat_child conf base p1 c1 p;
+          display_spouse conf base marks paths fam p c;
+          Wserver.printf "\n";
+          let print_children =
+            get_sex p = Male || not (Gwdb.Marker.get marks (get_iper c))
+          in
+          if print_children then Wserver.printf "<ol start=\"%d\">\n" (succ cnt);
+          let cnt =
+            Array.fold_left
+              begin fun cnt ie ->
+                let e = pget conf base ie in
+                if print_children then
+                  begin
+                    Wserver.printf "<li type=\"A\"> ";
+                    print_child conf base p c e;
+                    Wserver.printf "\n";
+                    incr total;
+                    if succ lev = max_lev then
+                      Array.iteri
+                        begin fun i ifam ->
+                          let fam = foi base ifam in
+                          let c1 = Gutil.spouse ie fam in
+                          let el = get_children fam in
+                          let c1 = pget conf base c1 in
+                          if i <> 0 then
+                            begin
+                              Wserver.printf "<br>" ;
+                              print_repeat_child conf base p c e
+                            end ;
+                          display_spouse conf base marks paths fam e c1;
+                          if Array.length el <> 0 then Wserver.printf ".....";
+                          Wserver.printf "\n"
+                        end
+                        (get_family (pget conf base ie))
+                    else loop (succ lev) e
+                  end ;
+                succ cnt
+              end
+              cnt el
+          in
+          if print_children then Wserver.printf "</ol>\n";
+          cnt, false, not print_children
+        end
+        (0, true, false) (get_family p)
   in
   loop lev e
 
 let last_label = ref ""
 
 let print_family conf base marks paths max_lev lev p =
-  if lev <> 0 then
-    begin
-      Wserver.printf "<tt><b>%s</b></tt>." (label_of_path paths p);
-      html_br conf
-    end;
+  if lev <> 0 then Wserver.printf "<tt><b>%s</b></tt>.<br>" (label_of_path paths p);
   let lab = label_of_path paths p in
   if lab < !last_label then failwith "print_family" else last_label := lab;
-  let _ =
-    List.fold_left
-      (fun cnt ifam ->
-         let fam = foi base ifam in
-         let c = Gutil.spouse (get_key_index p) fam in
-         let el = get_children fam in
-         let c = pget conf base c in
-         Wserver.printf "<strong>";
-         Wserver.printf "\n%s" (referenced_person_text conf base p);
-         Wserver.printf "</strong>";
-         display_spouse conf base marks paths fam p c;
-         Wserver.printf "<ol start=\"%d\">\n" (succ cnt);
-         let cnt =
-           List.fold_left
-             (fun cnt ie ->
-                let e = pget conf base ie in
-                if get_sex p = Male ||
-                   not marks.(Adef.int_of_iper (get_key_index c))
-                then
-                  begin
-                    Wserver.printf "<li type=\"A\">";
-                    print_child conf base p c e;
-                    incr total;
-                    Wserver.printf "\n";
-                    if labelled conf base marks max_lev lev ie then
-                      Wserver.printf " => <tt><b>%s</b></tt>\n"
-                        (label_of_path paths e)
-                    else if succ lev = max_lev then
-                      Array.iter
-                        (fun ifam ->
-                           let fam = foi base ifam in
-                           let c = Gutil.spouse ie fam in
-                           let el = get_children fam in
-                           let c = pget conf base c in
-                           display_spouse conf base marks paths fam e c;
-                           if Array.length el <> 0 then
-                             Wserver.printf ".....";
-                           Wserver.printf "\n")
-                        (get_family (pget conf base ie))
-                    else
-                      print_family_locally conf base marks paths max_lev
-                        (succ lev) p c e
-                  end;
-                succ cnt)
-             cnt (Array.to_list el)
-         in
-         Wserver.printf "</ol>\n"; cnt)
-      0 (Array.to_list (get_family p))
-  in
-  ()
+  ignore @@
+  Array.fold_left
+    (fun cnt ifam ->
+       let fam = foi base ifam in
+       let c = Gutil.spouse (get_iper p) fam in
+       let el = get_children fam in
+       let c = pget conf base c in
+       Wserver.printf "<strong>";
+       Wserver.printf "\n%s" (referenced_person_text conf base p);
+       Wserver.printf "</strong>";
+       display_spouse conf base marks paths fam p c;
+       Wserver.printf "<ol start=\"%d\">\n" (succ cnt);
+       let cnt =
+         Array.fold_left
+           (fun cnt ie ->
+              let e = pget conf base ie in
+              if get_sex p = Male
+              || not (Gwdb.Marker.get marks (get_iper c))
+              then
+                begin
+                  Wserver.printf "<li type=\"A\">";
+                  print_child conf base p c e;
+                  incr total;
+                  Wserver.printf "\n";
+                  if labelled conf base marks max_lev lev ie then
+                    Wserver.printf " => <tt><b>%s</b></tt>\n"
+                      (label_of_path paths e)
+                  else if succ lev = max_lev then
+                    Array.iter
+                      (fun ifam ->
+                         let fam = foi base ifam in
+                         let c = Gutil.spouse ie fam in
+                         let el = get_children fam in
+                         let c = pget conf base c in
+                         display_spouse conf base marks paths fam e c;
+                         if Array.length el <> 0 then
+                           Wserver.printf ".....";
+                         Wserver.printf "\n")
+                      (get_family (pget conf base ie))
+                  else
+                    print_family_locally conf base marks paths max_lev
+                      (succ lev) p c e
+                end;
+              succ cnt)
+           cnt el
+       in
+       Wserver.printf "</ol>\n"; cnt)
+    0 (get_family p)
 
 let print_families conf base marks paths max_lev =
   let rec loop lev p =
-    if lev < max_lev then
-      begin
-        print_family conf base marks paths max_lev lev p;
-        Array.iter
-          (fun ifam ->
-             let fam = foi base ifam in
-             let c = Gutil.spouse (get_key_index p) fam in
-             let el = get_children fam in
-             let c = pget conf base c in
-             if get_sex p = Male ||
-                not marks.(Adef.int_of_iper (get_key_index c))
-             then
-               Array.iter
-                 (fun ie ->
-                    let e = pget conf base ie in
-                    if labelled conf base marks max_lev lev ie then
-                      loop (succ lev) e)
-                 el)
-          (get_family p)
-      end
+    if lev < max_lev then begin
+      print_family conf base marks paths max_lev lev p;
+      Array.iter
+        (fun ifam ->
+           let fam = foi base ifam in
+           let c = Gutil.spouse (get_iper p) fam in
+           let el = get_children fam in
+           let c = pget conf base c in
+           if get_sex p = Male || not (Gwdb.Marker.get marks (get_iper c))
+           then
+             Array.iter
+               (fun ie ->
+                  let e = pget conf base ie in
+                  if labelled conf base marks max_lev lev ie then
+                    loop (succ lev) e)
+               el)
+        (get_family p)
+    end
   in
   loop 0
 
@@ -386,32 +369,33 @@ let display_descendants_with_numbers conf base max_level ancestor =
     else
       wprint_geneweb_link conf
         ("m=D&i=" ^
-         string_of_int (Adef.int_of_iper (get_key_index ancestor)) ^ "&v=" ^
+         string_of_iper (get_iper ancestor) ^ "&v=" ^
          string_of_int max_level ^ "&t=G")
         (capitale
            (let s1 = person_text conf base ancestor in
             let s2 = person_text_no_html conf base ancestor in
             transl_a_of_gr_eq_gen_lev conf (transl conf "descendants") s1 s2))
   in
-  let marks = Array.make (nb_of_persons base) false in
-  let paths = Array.make (nb_of_persons base) [] in
+  let persons = Gwdb.ipers base in
+  let marks = Gwdb.iper_marker persons false in
+  let paths = Gwdb.iper_marker persons [] in
   Hutil.header conf title;
   total := 0;
-  Wserver.printf "%s" (Date.short_dates_text conf base ancestor);
+  Wserver.printf "%s" (DateDisplay.short_dates_text conf base ancestor);
   let p = ancestor in
   if authorized_age conf base p then
     begin match Adef.od_of_cdate (get_birth p), get_death p with
-      Some _, _ | _, Death (_, _) -> html_br conf
+      Some _, _ | _, Death (_, _) -> Wserver.printf "<br>"
     | _ -> ()
     end;
   Wserver.printf "%s." (capitale (text_to conf max_level));
-  html_p conf;
-  mark_descendants conf base marks max_level (get_key_index ancestor);
+  Wserver.printf "<p>" ;
+  mark_descendants conf base marks max_level (get_iper ancestor);
   label_descendants conf base marks paths max_level ancestor;
   print_families conf base marks paths max_level ancestor;
   if !total > 1 then
     begin
-      html_p conf;
+      Wserver.printf "<p>" ;
       Wserver.printf "%s%s %d %s" (capitale (transl conf "total"))
         (Util.transl conf ":") !total
         (Util.translate_eval ("@(c)" ^ transl_nth conf "person/persons" 1));
@@ -422,26 +406,26 @@ let display_descendants_with_numbers conf base max_level ancestor =
   Hutil.trailer conf
 
 let print_ref conf base paths p =
-  if paths.(Adef.int_of_iper (get_key_index p)) <> [] then
+  if Gwdb.Marker.get paths (get_iper p) <> [] then
     Wserver.printf " => <tt><b>%s</b></tt>" (label_of_path paths p)
   else
     Array.iter
       (fun ifam ->
-         let c = Gutil.spouse (get_key_index p) (foi base ifam) in
-         if paths.(Adef.int_of_iper c) <> [] then
+         let c = Gutil.spouse (get_iper p) (foi base ifam) in
+         if Gwdb.Marker.get paths c <> [] then
            let c = pget conf base c in
            Wserver.printf " => %s %s <tt><b>%s</b></tt>" (p_first_name base c)
              (p_surname base c) (label_of_path paths c))
       (get_family p)
 
 let print_elem conf base paths precision (n, pll) =
-  html_li conf;
+  Wserver.printf "<li>" ;
   match List.rev pll with
     [[p]] ->
       Wserver.printf "<strong>%s %s %s</strong>" (surname_without_particle base n)
         (reference conf base p (person_text_without_surname conf base p))
         (surname_particle base n);
-      Wserver.printf "%s" (Date.short_dates_text conf base p);
+      Wserver.printf "%s" (DateDisplay.short_dates_text conf base p);
       print_ref conf base paths p;
       Wserver.printf "\n"
   | pll ->
@@ -457,7 +441,7 @@ let print_elem conf base paths precision (n, pll) =
            in
            List.iter
              (fun p ->
-                html_li conf;
+                Wserver.printf "<li>" ;
                 Wserver.printf "<strong>";
                 wprint_geneweb_link conf (acces conf base p)
                   (p_first_name base p);
@@ -468,7 +452,7 @@ let print_elem conf base paths precision (n, pll) =
                     specify_homonymous conf base p true;
                     Wserver.printf "</em>"
                   end;
-                Wserver.printf "%s" (Date.short_dates_text conf base p);
+                Wserver.printf "%s" (DateDisplay.short_dates_text conf base p);
                 print_ref conf base paths p;
                 Wserver.printf "\n")
              pl)
@@ -524,27 +508,32 @@ let display_descendant_index conf base max_level ancestor =
     if not h then
       wprint_geneweb_link conf
         ("m=D&i=" ^
-         string_of_int (Adef.int_of_iper (get_key_index ancestor)) ^ "&v=" ^
+         string_of_iper (get_iper ancestor) ^ "&v=" ^
          string_of_int max_level ^ "&t=C")
         txt
     else Wserver.printf "%s" txt
   in
   Hutil.header conf title;
-  let marks = Array.make (nb_of_persons base) false in
-  let paths = Array.make (nb_of_persons base) [] in
-  mark_descendants conf base marks max_level (get_key_index ancestor);
+  let persons = Gwdb.ipers base in
+  let marks = Gwdb.iper_marker persons false in
+  let paths = Gwdb.iper_marker persons [] in
+  mark_descendants conf base marks max_level (get_iper ancestor);
   label_descendants conf base marks paths max_level ancestor;
-  let list = ref [] in
-  for i = 0 to nb_of_persons base - 1 do
-    if paths.(i) <> [] then
-      let p = pget conf base (Adef.iper_of_int i) in
-      if p_first_name base p <> "?" && p_surname base p <> "?" &&
-         p_first_name base p <> "x" &&
-         (not (is_hide_names conf p) || authorized_age conf base p)
-      then
-        list := get_key_index p :: !list
-  done;
-  sort_and_display conf base paths true !list;
+  let list =
+    Gwdb.Collection.fold
+      (fun acc i ->
+         let p = pget conf base i in
+         if p_first_name base p <> "?"
+         && p_surname base p <> "?"
+         && p_first_name base p <> "x"
+         && (not (is_hide_names conf p) || authorized_age conf base p)
+         then i :: acc
+         else acc
+      )
+      []
+      persons
+  in
+  sort_and_display conf base paths true list;
   Hutil.trailer conf
 
 let display_spouse_index conf base max_level ancestor =
@@ -554,35 +543,41 @@ let display_spouse_index conf base max_level ancestor =
       (capitale (transl conf "index of the spouses (non descendants)"))
   in
   Hutil.header conf title;
-  let marks = Array.make (nb_of_persons base) false in
-  let paths = Array.make (nb_of_persons base) [] in
-  mark_descendants conf base marks max_level (get_key_index ancestor);
+  let persons = Gwdb.ipers base in
+  let marks = Gwdb.iper_marker persons false in
+  let paths = Gwdb.iper_marker persons [] in
+  mark_descendants conf base marks max_level (get_iper ancestor);
   label_descendants conf base marks paths max_level ancestor;
-  let list = ref [] in
-  for i = 0 to nb_of_persons base - 1 do
-    if paths.(i) <> [] then
-      let p = pget conf base (Adef.iper_of_int i) in
-      let u = p in
-      if p_first_name base p <> "?" && p_surname base p <> "?" &&
-         p_first_name base p <> "x"
-      then
-        Array.iter
-          (fun ifam ->
-             let c = Gutil.spouse (get_key_index p) (foi base ifam) in
-             if paths.(Adef.int_of_iper c) = [] then
-               let c = pget conf base c in
-               if p_first_name base c <> "?" && p_surname base c <> "?" &&
-                  p_first_name base p <> "x" &&
-                  (not (is_hide_names conf c) ||
-                   authorized_age conf base c) &&
-                  not (List.mem (get_key_index c) !list)
-               then
-                 list := get_key_index c :: !list)
-          (get_family u)
-  done;
-  sort_and_display conf base paths false !list;
+  let list =
+    Gwdb.Collection.fold
+      (fun acc i ->
+         if Gwdb.Marker.get paths i <> [] then
+           let p = pget conf base i in
+           if p_first_name base p <> "?"
+           && p_surname base p <> "?"
+           && p_first_name base p <> "x"
+           then
+             Array.fold_left
+               (fun acc ifam ->
+                  let c = Gutil.spouse (get_iper p) (foi base ifam) in
+                  if Gwdb.Marker.get paths c = [] then
+                    let c = pget conf base c in
+                    if p_first_name base c <> "?"
+                    && p_surname base c <> "?"
+                    && p_first_name base p <> "x"
+                    && (not (is_hide_names conf c) || authorized_age conf base c)
+                    && not (List.mem (get_iper c) acc)
+                    then get_iper c :: acc
+                    else acc
+                  else acc)
+               acc (get_family p)
+           else acc
+         else acc)
+      []
+      persons
+  in
+  sort_and_display conf base paths false list;
   Hutil.trailer conf
-
 
 (* *********************************************************************** *)
 (*  [Fonc] print_desc_table_header : config -> base -> int                 *)
@@ -703,7 +698,7 @@ let print_person_table conf base p lab =
       let (date, place) = Util.get_approx_birth_date_place conf base p in
       let date =
         match date with
-          Some d -> Date.string_slash_of_date conf d
+          Some d -> DateDisplay.string_slash_of_date conf d
         | None -> ""
       in
       date, place
@@ -717,7 +712,7 @@ let print_person_table conf base p lab =
       let (date, place) = Util.get_approx_death_date_place conf base p in
       let date =
         match date with
-          Some d -> Date.string_slash_of_date conf d
+          Some d -> DateDisplay.string_slash_of_date conf d
         | None -> ""
       in
       date, place
@@ -765,7 +760,7 @@ let print_person_table conf base p lab =
       begin let u = p in
         if nb_families > 0 then
           let cpl = foi base (get_family u).(0) in
-          let spouse = pget conf base (Gutil.spouse (get_key_index p) cpl) in
+          let spouse = pget conf base (Gutil.spouse (get_iper p) cpl) in
           Util.print_image_sex conf spouse 11;
           Wserver.printf " %s &nbsp;"
             (referenced_person_text conf base spouse)
@@ -783,13 +778,13 @@ let print_person_table conf base p lab =
       begin let u = p in
         if nb_families > 0 then
           let cpl = foi base (get_family u).(0) in
-          let spouse = pget conf base (Gutil.spouse (get_key_index p) cpl) in
+          let spouse = pget conf base (Gutil.spouse (get_iper p) cpl) in
           let mdate =
             if authorized_age conf base p && authorized_age conf base spouse
             then
               let fam = foi base (get_family u).(0) in
               match Adef.od_of_cdate (get_marriage fam) with
-                Some d -> Date.string_slash_of_date conf d
+                Some d -> DateDisplay.string_slash_of_date conf d
               | _ -> "&nbsp;"
             else "&nbsp;"
           in
@@ -808,7 +803,7 @@ let print_person_table conf base p lab =
       begin let u = p in
         if nb_families > 0 then
           let cpl = foi base (get_family u).(0) in
-          let spouse = pget conf base (Gutil.spouse (get_key_index p) cpl) in
+          let spouse = pget conf base (Gutil.spouse (get_iper p) cpl) in
           let mplace =
             if authorized_age conf base p && authorized_age conf base spouse
             then
@@ -840,11 +835,12 @@ let print_person_table conf base p lab =
         Wserver.printf "</td>\n"
       end
     else
-      begin let n =
-        List.fold_left
-          (fun n ifam -> n + Array.length (get_children (foi base ifam))) 0
-          (Array.to_list (get_family p))
-      in
+      begin
+        let n =
+          Array.fold_left
+            (fun n ifam -> n + Array.length (get_children (foi base ifam))) 0
+            (get_family p)
+        in
         Wserver.printf "<td>\n";
         Wserver.printf "%d &nbsp;" n;
         Wserver.printf "</td>\n"
@@ -871,12 +867,12 @@ let print_person_table conf base p lab =
             Some (Dgreg (({prec = Sure | About | Maybe} as d1), _)),
             Some (Dgreg (({prec = Sure | About | Maybe} as d2), _)), approx
             when d1 <> d2 ->
-              let a = CheckItem.time_elapsed d1 d2 in
+              let a = Date.time_elapsed d1 d2 in
               let s =
                 if not approx && d1.prec = Sure && d2.prec = Sure then ""
                 else transl_decline conf "possibly (date)" "" ^ " "
               in
-              s ^ Date.string_of_age conf a
+              s ^ DateDisplay.string_of_age conf a
           | _ -> ""
       in
         Wserver.printf "%s &nbsp;" d
@@ -904,7 +900,7 @@ let print_person_table conf base p lab =
       let u = p in
       for i = 1 to nb_families - 1 do
         let cpl = foi base (get_family u).(i) in
-        let spouse = pget conf base (Gutil.spouse (get_key_index p) cpl) in
+        let spouse = pget conf base (Gutil.spouse (get_iper p) cpl) in
         let fam = foi base (get_family u).(i) in
         Wserver.printf "<tr>\n";
         if p_getenv conf.env "marr" = Some "on" then
@@ -925,7 +921,7 @@ let print_person_table conf base p lab =
               then
                 let fam = foi base (get_family u).(i) in
                 match Adef.od_of_cdate (get_marriage fam) with
-                  Some d -> Date.string_slash_of_date conf d
+                  Some d -> DateDisplay.string_slash_of_date conf d
                 | _ -> "&nbsp;"
               else "&nbsp;"
             in
@@ -984,16 +980,16 @@ let build_desc conf base l =
         let nx_accu =
           (* On fait des fold_left pour garder l'ordre des enfants. *)
           (* lab correspond au numéro d'Aboville de p.              *)
-          List.fold_left
+          Array.fold_left
             (fun accu ifam ->
                let fam = foi base ifam in
-               List.fold_left
+               Array.fold_left
                  (fun accu ip ->
                     let _ = incr cnt in
                     (pget conf base ip, lab ^ string_of_int !cnt ^ ".") ::
                     accu)
-                 accu (Array.to_list (get_children fam)))
-            accu (Array.to_list (get_family p))
+                 accu (get_children fam))
+            accu (get_family p)
         in
         loop l nx_accu
   in
@@ -1079,13 +1075,15 @@ let make_tree_hts conf base gv p =
     if v = 0 then n + max 1 (Array.length (get_family u))
     else if Array.length (get_family u) = 0 then n + 1
     else
-      List.fold_left (fun n ifam -> fam_nb_column n v (foi base ifam)) n
-        (Array.to_list (get_family u))
+      Array.fold_left
+        (fun n ifam -> fam_nb_column n v (foi base ifam)) n
+        (get_family u)
   and fam_nb_column n v des =
     if Array.length (get_children des) = 0 then n + 1
     else
-      List.fold_left (fun n iper -> nb_column n (v - 1) (pget conf base iper))
-        n (Array.to_list (get_children des))
+      Array.fold_left
+        (fun n iper -> nb_column n (v - 1) (pget conf base iper))
+        n (get_children des)
   in
   let vertical_bar_txt v tdl po =
     let tdl = if tdl = [] then [] else (1, LeftA, TDnothing) :: tdl in
@@ -1111,23 +1109,23 @@ let make_tree_hts conf base gv p =
   let spouses_vertical_bar_txt v tdl po =
     let tdl = if tdl = [] then [] else (1, LeftA, TDnothing) :: tdl in
     match po with
-      Some (p, _) when Array.length (get_family p) > 0 ->
-        fst
-          (List.fold_left
-             (fun (tdl, first) ifam ->
-                let tdl =
-                  if first then tdl else (1, LeftA, TDnothing) :: tdl
-                in
-                let des = foi base ifam in
-                let td =
-                  if Array.length (get_children des) = 0 then
-                    1, LeftA, TDnothing
-                  else
-                    let ncol = fam_nb_column 0 (v - 1) des in
-                    2 * ncol - 1, CenterA, TDbar None
-                in
-                td :: tdl, false)
-             (tdl, true) (Array.to_list (get_family p)))
+    | Some (p, _) when Array.length (get_family p) > 0 ->
+      fst @@
+      Array.fold_left
+        (fun (tdl, first) ifam ->
+           let tdl =
+             if first then tdl else (1, LeftA, TDnothing) :: tdl
+           in
+           let des = foi base ifam in
+           let td =
+             if Array.length (get_children des) = 0 then
+               1, LeftA, TDnothing
+             else
+               let ncol = fam_nb_column 0 (v - 1) des in
+               2 * ncol - 1, CenterA, TDbar None
+           in
+           td :: tdl, false)
+        (tdl, true) (get_family p)
     | _ -> (1, LeftA, TDnothing) :: tdl
   in
   let spouses_vertical_bar v gen =
@@ -1137,47 +1135,47 @@ let make_tree_hts conf base gv p =
   let horizontal_bar_txt v tdl po =
     let tdl = if tdl = [] then [] else (1, LeftA, TDnothing) :: tdl in
     match po with
-      Some (p, _) when Array.length (get_family p) > 0 ->
-        fst
-          (List.fold_left
-             (fun (tdl, first) ifam ->
-                let tdl =
-                  if first then tdl else (1, LeftA, TDnothing) :: tdl
-                in
-                let des = foi base ifam in
-                let tdl =
-                  if Array.length (get_children des) = 0 then
-                    (1, LeftA, TDnothing) :: tdl
-                  else if Array.length (get_children des) = 1 then
-                    let u = pget conf base (get_children des).(0) in
-                    let ncol = nb_column 0 (v - 1) u in
-                    (2 * ncol - 1, CenterA, TDbar None) :: tdl
-                  else
-                    let rec loop tdl i =
-                      if i = Array.length (get_children des) then tdl
-                      else
-                        let iper = (get_children des).(i) in
-                        let u = pget conf base iper in
-                        let tdl =
-                          if i > 0 then
-                            let align = CenterA in
-                            (1, align, TDhr align) :: tdl
-                          else tdl
-                        in
-                        let ncol = nb_column 0 (v - 1) u in
-                        let align =
-                          if i = 0 then RightA
-                          else if i = Array.length (get_children des) - 1 then
-                            LeftA
-                          else CenterA
-                        in
-                        let td = 2 * ncol - 1, align, TDhr align in
-                        loop (td :: tdl) (i + 1)
-                    in
-                    loop tdl 0
-                in
-                tdl, false)
-             (tdl, true) (Array.to_list (get_family p)))
+    | Some (p, _) when Array.length (get_family p) > 0 ->
+      fst @@
+      Array.fold_left
+        (fun (tdl, first) ifam ->
+           let tdl =
+             if first then tdl else (1, LeftA, TDnothing) :: tdl
+           in
+           let des = foi base ifam in
+           let tdl =
+             if Array.length (get_children des) = 0 then
+               (1, LeftA, TDnothing) :: tdl
+             else if Array.length (get_children des) = 1 then
+               let u = pget conf base (get_children des).(0) in
+               let ncol = nb_column 0 (v - 1) u in
+               (2 * ncol - 1, CenterA, TDbar None) :: tdl
+             else
+               let rec loop tdl i =
+                 if i = Array.length (get_children des) then tdl
+                 else
+                   let iper = (get_children des).(i) in
+                   let u = pget conf base iper in
+                   let tdl =
+                     if i > 0 then
+                       let align = CenterA in
+                       (1, align, TDhr align) :: tdl
+                     else tdl
+                   in
+                   let ncol = nb_column 0 (v - 1) u in
+                   let align =
+                     if i = 0 then RightA
+                     else if i = Array.length (get_children des) - 1 then
+                       LeftA
+                     else CenterA
+                   in
+                   let td = 2 * ncol - 1, align, TDhr align in
+                   loop (td :: tdl) (i + 1)
+               in
+               loop tdl 0
+           in
+           tdl, false)
+        (tdl, true) (get_family p)
     | _ -> (1, LeftA, TDnothing) :: tdl
   in
   let horizontal_bars v gen =
@@ -1196,7 +1194,7 @@ let make_tree_hts conf base gv p =
           let txt = person_title_text conf base p in
           let txt = reference conf base p txt in
           let txt =
-            if auth then txt ^ Date.short_dates_text conf base p else txt
+            if auth then txt ^ DateDisplay.short_dates_text conf base p else txt
           in
           let txt = txt ^ Dag.image_txt conf base p in
           let txt =
@@ -1227,15 +1225,15 @@ let make_tree_hts conf base gv p =
               let fam = foi base ifam in
               let ncol = if v > 1 then fam_nb_column 0 (v - 1) fam else 1 in
               let s =
-                let sp = pget conf base (Gutil.spouse (get_key_index p) fam) in
+                let sp = pget conf base (Gutil.spouse (get_iper p) fam) in
                 let txt = person_title_text conf base sp in
                 let txt = reference conf base sp txt in
                 let txt =
-                  if auth then txt ^ Date.short_dates_text conf base sp
+                  if auth then txt ^ DateDisplay.short_dates_text conf base sp
                   else txt
                 in
                 "&amp;" ^
-                (if auth then Date.short_marriage_date_text conf base fam p sp
+                (if auth then DateDisplay.short_marriage_date_text conf base fam p sp
                  else "") ^
                 "&nbsp;" ^ txt ^ Dag.image_txt conf base sp
               in
@@ -1260,23 +1258,22 @@ let make_tree_hts conf base gv p =
            Some (p, _) ->
              if Array.length (get_family p) = 0 then None :: gen
              else
-               List.fold_right
+               Array.fold_right
                  (fun ifam gen ->
                     let des = foi base ifam in
                     if Array.length (get_children des) = 0 then None :: gen
                     else
                       let age_auth =
-                        List.for_all
-                          (fun ip ->
-                             authorized_age conf base (pget conf base ip))
-                          (Array.to_list (get_children des))
+                        Array.for_all
+                          (fun ip -> authorized_age conf base (pget conf base ip))
+                          (get_children des)
                       in
-                      List.fold_right
+                      Array.fold_right
                         (fun iper gen ->
                            let g = pget conf base iper, age_auth in
                            Some g :: gen)
-                        (Array.to_list (get_children des)) gen)
-                 (Array.to_list (get_family p)) gen
+                        (get_children des) gen)
+                 (get_family p) gen
          | None -> None :: gen)
       gen []
   in
@@ -1322,26 +1319,26 @@ let print_aboville conf base max_level p =
     if num_aboville then Wserver.printf "<tt>%s</tt>\n" lab
     else Wserver.printf "%s\n" lab;
     Wserver.printf "%s%s\n" (referenced_person_title_text conf base p)
-      (Date.short_dates_text conf base p);
+      (DateDisplay.short_dates_text conf base p);
     let u = p in
     if lev < max_level then
       for i = 0 to Array.length (get_family u) - 1 do
         let cpl = foi base (get_family u).(i) in
-        let spouse = pget conf base (Gutil.spouse (get_key_index p) cpl) in
+        let spouse = pget conf base (Gutil.spouse (get_iper p) cpl) in
         let mdate =
           if authorized_age conf base p && authorized_age conf base spouse
           then
             let fam = foi base (get_family u).(i) in
             match Adef.od_of_cdate (get_marriage fam) with
               Some (Dgreg (d, _)) ->
-                let date = Date.prec_year_text conf d in
+                let date = DateDisplay.prec_year_text conf d in
                 "<font size=\"-2\"><em>" ^ date ^ "</em></font>"
             | _ -> ""
           else ""
         in
         Wserver.printf "&amp;%s %s%s\n" mdate
           (referenced_person_title_text conf base spouse)
-          (Date.short_dates_text conf base spouse)
+          (DateDisplay.short_dates_text conf base spouse)
       done;
     Wserver.printf "<br>\n";
     if lev < max_level then

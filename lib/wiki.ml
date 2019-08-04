@@ -682,7 +682,6 @@ let print_mod_view_page conf can_edit mode fname title env s =
   if can_edit && has_v then
     print_sub_part_links conf (mode_pref ^ mode) sfn v is_empty;
   Wserver.printf "<form method=\"post\" action=\"%s\">\n" conf.command;
-  Wserver.printf "<p>\n";
   Util.hidden_env conf;
   if can_edit then
     Wserver.printf
@@ -700,53 +699,37 @@ let print_mod_view_page conf can_edit mode fname title env s =
         "<input type=\"hidden\" name=\"digest\" value=\"%s\"%s>\n" digest
         conf.xhs
     end;
-  begin_centered conf;
-  Wserver.printf "<table border=\"1\">\n";
-  Wserver.printf "<tr>\n";
-  Wserver.printf "<td>\n";
-  Wserver.printf "<table>\n";
+  Wserver.printf "<div class=\"row ml-3\">\n";
   begin match Util.open_etc_file "toolbar" with
     Some ic ->
-      Wserver.printf "<tr>\n";
-      Wserver.printf "<td>\n";
+      Wserver.printf "<div class=\"d-inline col-9 py-1\">\n";
       Templ.copy_from_templ conf ["name", "notes"] ic;
-      Wserver.printf "</td>\n";
-      Wserver.printf "</tr>\n"
+      Wserver.printf "</div>\n";
   | None -> ()
   end;
-  Wserver.printf "<tr>\n";
-  Wserver.printf "<td>\n";
-  Wserver.printf "<textarea name=\"notes\" id=\"notes_comments\" rows=\"25\" cols=\"110\"%s>"
+  Wserver.printf "<textarea name=\"notes\" id=\"notes_comments\"";
+  Wserver.printf " class=\"col-9 form-control\" rows=\"25\" cols=\"110\"%s>"
     (if can_edit then "" else " readonly=\"readonly\"");
   Wserver.printf "%s" (Util.escape_html sub_part);
   Wserver.printf "</textarea>";
-  Wserver.printf "</td>\n";
-  Wserver.printf "</tr>\n";
-  begin match Util.open_etc_file "accent" with
-    Some ic ->
-      Wserver.printf "<tr>\n";
-      Wserver.printf "<td>\n";
-      Templ.copy_from_templ conf ["name", "notes"] ic;
-      Wserver.printf "</td>\n";
-      Wserver.printf "</tr>\n"
-  | None -> ()
-  end;
-  Wserver.printf "</table>\n";
   if can_edit then
     begin
-      Wserver.printf "<br%s>\n" conf.xhs;
       begin
         Wserver.printf
-          "<button type=\"submit\" class=\"btn btn-secondary btn-lg\">\n";
+          "<button type=\"submit\" class=\"btn btn-outline-primary btn-lg";
+        Wserver.printf " col-4 py-3 mt-2 mb-3 mx-auto order-3\">";
         Wserver.printf "%s" (capitale (transl_nth conf "validate/delete" 0));
         Wserver.printf "</button>\n"
       end
     end;
-  Wserver.printf "</td>\n";
-  Wserver.printf "</tr>\n";
-  Wserver.printf "</table>\n";
-  end_centered conf;
-  Wserver.printf "</p>\n";
+  begin match Util.open_etc_file "accent" with
+    Some ic ->
+      Wserver.printf "<div class=\"col my-1 mr-2 text-monospace\">\n";
+      Templ.copy_from_templ conf ["name", "notes"] ic;
+      Wserver.printf "</div>\n";
+  | None -> ()
+  end;
+  Wserver.printf "</div>\n";
   Wserver.printf "</form>\n";
   Hutil.trailer conf
 
@@ -866,32 +849,30 @@ let print_ok conf wi edit_mode fname title_is_1st s =
 let print_mod_ok conf wi edit_mode fname read_string commit string_filter
     title_is_1st =
   let fname = fname (Util.p_getenv conf.env "f") in
-  try
-    match edit_mode fname with
-      Some edit_mode ->
-        let old_string =
-          let (e, s) = read_string fname in
-          List.fold_left (fun s (k, v) -> s ^ k ^ "=" ^ v ^ "\n") "" e ^ s
-        in
-        let sub_part =
-          match Util.p_getenv conf.env "notes" with
-            Some v -> Mutil.strip_all_trailing_spaces v
-          | None -> failwith "notes unbound"
-        in
-        let digest =
-          match Util.p_getenv conf.env "digest" with
-            Some s -> s
-          | None -> ""
-        in
-        if digest <> Iovalue.digest old_string then Update.error_digest conf
-        else
-          let s =
-            match Util.p_getint conf.env "v" with
-              Some v -> insert_sub_part old_string v sub_part
-            | None -> sub_part
-          in
-          if s <> old_string then commit fname s;
-          let sub_part = string_filter sub_part in
-          print_ok conf wi edit_mode fname title_is_1st sub_part
-    | None -> Hutil.incorrect_request conf
-  with Update.ModErr -> ()
+  match edit_mode fname with
+    Some edit_mode ->
+    let old_string =
+      let (e, s) = read_string fname in
+      List.fold_left (fun s (k, v) -> s ^ k ^ "=" ^ v ^ "\n") "" e ^ s
+    in
+    let sub_part =
+      match Util.p_getenv conf.env "notes" with
+        Some v -> Mutil.strip_all_trailing_spaces v
+      | None -> failwith "notes unbound"
+    in
+    let digest =
+      match Util.p_getenv conf.env "digest" with
+        Some s -> s
+      | None -> ""
+    in
+    if digest <> Iovalue.digest old_string then Update.error_digest conf
+    else
+      let s =
+        match Util.p_getint conf.env "v" with
+          Some v -> insert_sub_part old_string v sub_part
+        | None -> sub_part
+      in
+      if s <> old_string then commit fname s;
+      let sub_part = string_filter sub_part in
+      print_ok conf wi edit_mode fname title_is_1st sub_part
+  | None -> Hutil.incorrect_request conf

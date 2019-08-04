@@ -35,7 +35,8 @@ let threshold = ref 10
 let phony_dist_tab = (fun _ -> 0), (fun _ -> infinity)
 
 let tsort_leq tstab x y =
-  if tstab.(x) = tstab.(y) then x >= y else tstab.(x) < tstab.(y)
+  if Gwdb.Marker.get tstab x = Gwdb.Marker.get tstab y then x >= y
+  else Gwdb.Marker.get tstab x < Gwdb.Marker.get tstab y
 
 let make_dist_tab conf base ia maxlev =
   if maxlev <= !threshold then phony_dist_tab
@@ -43,45 +44,45 @@ let make_dist_tab conf base ia maxlev =
     let tstab = Util.create_topological_sort conf base in
     let module Pq =
       Pqueue.Make
-        (struct type t = int let leq x y = not (tsort_leq tstab x y) end)
+        (struct type t = iper let leq x y = not (tsort_leq tstab x y) end)
     in
     let default = {dmin = infinity; dmax = 0; mark = false} in
-    let dist = Array.make (nb_of_persons base) default in
+    let dist = Gwdb.iper_marker (Gwdb.ipers base) default in
     let q = ref Pq.empty in
     let add_children ip =
       let u = pget conf base ip in
       for i = 0 to Array.length (get_family u) - 1 do
         let des = foi base (get_family u).(i) in
         for j = 0 to Array.length (get_children des) - 1 do
-          let k = Adef.int_of_iper (get_children des).(j) in
-          let d = dist.(k) in
+          let k = (get_children des).(j) in
+          let d = Gwdb.Marker.get dist k in
           if not d.mark then
             begin
-              dist.(k) <- {dmin = infinity; dmax = 0; mark = true};
+              Gwdb.Marker.set dist k @@ {dmin = infinity; dmax = 0; mark = true};
               q := Pq.add k !q
             end
         done
       done
     in
-    dist.(Adef.int_of_iper ia) <- {dmin = 0; dmax = 0; mark = true};
+    Gwdb.Marker.set dist ia @@ {dmin = 0; dmax = 0; mark = true};
     add_children ia;
     while not (Pq.is_empty !q) do
       begin let (k, nq) = Pq.take !q in
         q := nq;
-        match get_parents (pget conf base (Adef.iper_of_int k)) with
+        match get_parents (pget conf base k) with
           Some ifam ->
             let cpl = foi base ifam in
-            let dfath = dist.(Adef.int_of_iper (get_father cpl)) in
-            let dmoth = dist.(Adef.int_of_iper (get_mother cpl)) in
-            dist.(k).dmin <- min dfath.dmin dmoth.dmin + 1;
-            dist.(k).dmax <- max dfath.dmax dmoth.dmax + 1;
-            if dist.(k).dmin > maxlev then ()
-            else add_children (Adef.iper_of_int k)
+            let dfath = Gwdb.Marker.get dist (get_father cpl) in
+            let dmoth = Gwdb.Marker.get dist (get_mother cpl) in
+            (Gwdb.Marker.get dist k).dmin <- min dfath.dmin dmoth.dmin + 1;
+            (Gwdb.Marker.get dist k).dmax <- max dfath.dmax dmoth.dmax + 1;
+            if (Gwdb.Marker.get dist k).dmin > maxlev then ()
+            else add_children k
         | None -> ()
       end
     done;
-    (fun ip -> dist.(Adef.int_of_iper ip).dmin),
-    (fun ip -> dist.(Adef.int_of_iper ip).dmax)
+    (fun ip -> (Gwdb.Marker.get dist ip).dmin),
+    (fun ip -> (Gwdb.Marker.get dist ip).dmax)
 
 let find_first_branch conf base (dmin, dmax) ia =
   let rec find br len ip sp =
@@ -178,7 +179,7 @@ let find_prev_branch conf base dist ia sa ipl =
 
 let someone_text conf base ip =
   let p = pget conf base ip in
-  referenced_person_title_text conf base p ^ Date.short_dates_text conf base p
+  referenced_person_title_text conf base p ^ DateDisplay.short_dates_text conf base p
 
 let spouse_text conf base end_sp ip ipl =
   match ipl, (p_getenv conf.env "spouse", p_getenv conf.env "opt") with
@@ -191,7 +192,7 @@ let spouse_text conf base end_sp ip ipl =
             if ip = get_father fam then get_mother fam else get_father fam
           in
           let d =
-            Date.short_marriage_date_text conf base fam
+            DateDisplay.short_marriage_date_text conf base fam
               (pget conf base (get_father fam))
               (pget conf base (get_mother fam))
           in
@@ -201,7 +202,7 @@ let spouse_text conf base end_sp ip ipl =
   | [], _ ->
       begin match end_sp with
         Some p ->
-          someone_text conf base (get_key_index p), "", Some (get_key_index p)
+          someone_text conf base (get_iper p), "", Some (get_iper p)
       | _ -> "", "", None
       end
   | _ -> "", "", None
@@ -312,8 +313,8 @@ let sign_text conf base sign info b1 b2 c1 c2 =
   "<a href=\"" ^ commd conf ^ "m=RL" ^ "&" ^
   acces_n conf base "1" (pget conf base info.ip1) ^ "&" ^
   acces_n conf base "2" (pget conf base info.ip2) ^ "&b1=" ^
-  Sosa.to_string (sosa_of_branch ((info.ip, info.sp) :: b1)) ^ "&b2=" ^
-  Sosa.to_string (sosa_of_branch ((info.ip, info.sp) :: b2)) ^ "&c1=" ^
+  Sosa.to_string (old_sosa_of_branch conf base ((info.ip, info.sp) :: b1)) ^ "&b2=" ^
+  Sosa.to_string (old_sosa_of_branch conf base ((info.ip, info.sp) :: b2)) ^ "&c1=" ^
   string_of_int c1 ^ "&c2=" ^ string_of_int c2 ^
   (match p_getenv conf.env "spouse" with
      Some "on" -> "&spouse=on"
@@ -403,7 +404,7 @@ let other_parent_text_if_same conf base info =
           begin match other_parent with
             Some ip ->
               let d =
-                Date.short_marriage_date_text conf base (foi base ifam1)
+                DateDisplay.short_marriage_date_text conf base (foi base ifam1)
                   (pget conf base (get_father cpl1))
                   (pget conf base (get_mother cpl1))
               in
@@ -617,7 +618,7 @@ let print_relation_no_dag conf base po ip1 ip2 =
   let params =
     match po, p_getint conf.env "l1", p_getint conf.env "l2" with
       Some p, Some l1, Some l2 ->
-        let ip = get_key_index p in
+        let ip = get_iper p in
         let dist = make_dist_tab conf base ip (max l1 l2 + 1) in
         let b1 = find_first_branch conf base dist ip l1 ip1 Neuter in
         let b2 = find_first_branch conf base dist ip l2 ip2 Neuter in
@@ -628,7 +629,7 @@ let print_relation_no_dag conf base po ip1 ip2 =
             let n1 = Sosa.of_string b1str in
             let n2 = Sosa.of_string b2str in
             begin match
-              branch_of_sosa conf base ip1 n1, branch_of_sosa conf base ip2 n2
+              old_branch_of_sosa conf base ip1 n1, old_branch_of_sosa conf base ip2 n2
             with
               Some ((ia1, sa1) :: b1), Some ((ia2, _) :: b2) ->
                 if ia1 = ia2 then
@@ -694,7 +695,7 @@ let print_relation_no_dag conf base po ip1 ip2 =
   | _ -> Hutil.incorrect_request conf
 
 let print_relation_dag conf base a ip1 ip2 l1 l2 =
-  let ia = get_key_index a in
+  let ia = get_iper a in
   let add_branches dist set n ip l =
     let b = find_first_branch conf base dist ia l ip Neuter in
     let rec loop set n b =
@@ -727,7 +728,7 @@ let print_relation_dag conf base a ip1 ip2 l1 l2 =
       List.fold_right
         (fun (ip, s) spl ->
            match find_person_in_env conf base s with
-             Some sp -> (ip, (get_key_index sp, None)) :: spl
+             Some sp -> (ip, (get_iper sp, None)) :: spl
            | None -> spl)
         [ip1, "3"; ip2, "4"] []
     in
@@ -759,10 +760,10 @@ let print_relation conf base p1 p2 =
   let po = find_person_in_env conf base "" in
   match p_getenv conf.env "dag", po, l1, l2 with
     Some "on", Some p, Some l1, Some l2 ->
-      print_relation_dag conf base p (get_key_index p1) (get_key_index p2)
+      print_relation_dag conf base p (get_iper p1) (get_iper p2)
         (int_list l1) (int_list l2)
   | _ ->
-      print_relation_no_dag conf base po (get_key_index p1) (get_key_index p2)
+      print_relation_no_dag conf base po (get_iper p1) (get_iper p2)
 
 let print conf base =
   match

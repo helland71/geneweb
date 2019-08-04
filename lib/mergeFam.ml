@@ -16,17 +16,22 @@ let need_differences_selection conf base fam1 fam2 =
   need_selection
     (fun fam ->
        match get_relation fam with
-         Married -> "married"
+       | Married -> "married"
        | NotMarried -> "not married"
        | Engaged -> "engaged"
        | NoSexesCheckNotMarried -> "no sexes check"
        | NoSexesCheckMarried -> "no sexes check married"
-       | NoMention -> "no mention") ||
+       | NoMention -> "no mention"
+       | MarriageBann -> "marriage banns"
+       | MarriageContract -> "marriage contract"
+       | MarriageLicense -> "marriage license"
+       | Pacs -> "pacs"
+       | Residence -> "residence") ||
   need_selection
     (fun fam ->
        match Adef.od_of_cdate (get_marriage fam) with
          None -> ""
-       | Some d -> Date.string_of_ondate conf d) ||
+       | Some d -> DateDisplay.string_of_ondate conf d) ||
   need_selection (fun fam -> sou base (get_marriage_place fam)) ||
   need_selection
     (fun fam ->
@@ -35,7 +40,7 @@ let need_differences_selection conf base fam1 fam2 =
        | Separated -> "separated"
        | Divorced cod ->
            match Adef.od_of_cdate cod with
-             Some d -> Date.string_of_ondate conf d
+             Some d -> DateDisplay.string_of_ondate conf d
            | None -> "divorced")
 
 let print_differences conf base branches (ifam1, fam1) (ifam2, fam2) =
@@ -43,32 +48,21 @@ let print_differences conf base branches (ifam1, fam1) (ifam2, fam2) =
     let x1 = proj fam1 in
     let x2 = proj fam2 in
     if x1 <> "" && x2 <> "" && x1 <> x2 then
-      begin
-        Wserver.printf "<h4>%s</h4>\n" (capitale title);
-        begin
-          Wserver.printf "<ul>\n";
-          html_li conf;
-          Wserver.printf
-            "<input type=\"radio\" class=\"form-control\" name=\"%s\" \
-           value=\"1\" checked>\n"
-            name;
-          Wserver.printf "%s\n" x1;
-          html_li conf;
-          Wserver.printf "<input type=\"radio\" class=\"form-control\" \
-           name=\"%s\" value=\"2\">\n"
-            name;
-          Wserver.printf "%s\n" x2;
-          Wserver.printf "</ul>\n"
-        end
-      end
+      Wserver.printf
+        "<h4>%s</h4>\
+         <ul>\
+         <li><input type=\"radio\" class=\"form-control\" name=\"%s\" value=\"1\" checked>%s</li>\
+         <li><input type=\"radio\" class=\"form-control\" name=\"%s\" value=\"2\">%s</li>\
+         </ul>"
+        (capitale title) name x1 name x2;
   in
   Wserver.printf "<form method=\"post\" action=\"%s\">\n" conf.command;
   Util.hidden_env conf;
   Wserver.printf "<input type=\"hidden\" name=\"m\" value=\"MRG_FAM_OK\">\n";
-  Wserver.printf "<input type=\"hidden\" name=\"i\" value=\"%d\">\n"
-    (Adef.int_of_ifam ifam1);
-  Wserver.printf "<input type=\"hidden\" name=\"i2\" value=\"%d\">\n"
-    (Adef.int_of_ifam ifam2);
+  Wserver.printf "<input type=\"hidden\" name=\"i\" value=\"%s\">\n"
+    (string_of_ifam ifam1);
+  Wserver.printf "<input type=\"hidden\" name=\"i2\" value=\"%s\">\n"
+    (string_of_ifam ifam2);
   begin match p_getenv conf.env "ip" with
     Some ip ->
       Wserver.printf "<input type=\"hidden\" name=\"ip\" value=\"%s\">\n" ip
@@ -77,16 +71,16 @@ let print_differences conf base branches (ifam1, fam1) (ifam2, fam2) =
   begin let rec loop =
     function
       [ip1, ip2] ->
-        Wserver.printf "<input type=\"hidden\" name=\"ini1\" value=\"%d\">\n"
-          (Adef.int_of_iper ip1);
-        Wserver.printf "<input type=\"hidden\" name=\"ini2\" value=\"%d\">\n"
-          (Adef.int_of_iper ip2)
+        Wserver.printf "<input type=\"hidden\" name=\"ini1\" value=\"%s\">\n"
+          (string_of_iper ip1);
+        Wserver.printf "<input type=\"hidden\" name=\"ini2\" value=\"%s\">\n"
+          (string_of_iper ip2)
     | _ :: branches -> loop branches
     | _ -> ()
   in
     loop branches
   end;
-  html_p conf;
+  Wserver.printf "<p>" ;
   string_field (transl_nth conf "relation/relations" 0) "relation"
     (fun fam ->
        match get_relation fam with
@@ -95,13 +89,18 @@ let print_differences conf base branches (ifam1, fam1) (ifam2, fam2) =
        | Engaged -> transl conf "engaged"
        | NoSexesCheckNotMarried -> transl conf "no sexes check"
        | NoSexesCheckMarried -> transl conf "married"
-       | NoMention -> transl conf "no mention");
+       | NoMention -> transl conf "no mention"
+       | MarriageBann -> "marriage banns"
+       | MarriageContract -> "marriage contract"
+       | MarriageLicense -> "marriage license"
+       | Pacs -> "pacs"
+       | Residence -> "residence");
   string_field (Util.translate_eval (transl_nth conf "marriage/marriages" 0))
     "marriage"
     (fun fam ->
        match Adef.od_of_cdate (get_marriage fam) with
          None -> ""
-       | Some d -> Date.string_of_ondate conf d);
+       | Some d -> DateDisplay.string_of_ondate conf d);
   string_field
     (Util.translate_eval (transl_nth conf "marriage/marriages" 0) ^ " / " ^
      transl conf "place")
@@ -114,16 +113,13 @@ let print_differences conf base branches (ifam1, fam1) (ifam2, fam2) =
        | Divorced cod ->
            let ds =
              match Adef.od_of_cdate cod with
-               Some d -> " " ^ Date.string_of_ondate conf d
+               Some d -> " " ^ DateDisplay.string_of_ondate conf d
              | None -> ""
            in
            transl conf "divorced" ^ ds);
-  html_p conf;
   Wserver.printf
-    "<button type=\"submit\" class=\"btn btn-secondary btn-lg\">\n";
-  Wserver.printf "%s" (capitale (transl_nth conf "validate/delete" 0));
-  Wserver.printf "</button>\n";
-  Wserver.printf "</form>\n"
+    "</p><p><button type=\"submit\" class=\"btn btn-secondary btn-lg\">%s</button></form>"
+    (capitale (transl_nth conf "validate/delete" 0))
 
 let merge_fam1 conf base fam1 fam2 =
   let title _ =
@@ -147,10 +143,10 @@ let merge_fam conf base (ifam1, fam1) (ifam2, fam2) =
   else Hutil.incorrect_request conf
 
 let print conf base =
-  match p_getint conf.env "i", p_getint conf.env "i2" with
+  match p_getenv conf.env "i", p_getenv conf.env "i2" with
     Some f1, Some f2 ->
-      let ifam1 = Adef.ifam_of_int f1 in
-      let ifam2 = Adef.ifam_of_int f2 in
+      let ifam1 = ifam_of_string f1 in
+      let ifam2 = ifam_of_string f2 in
       let fam1 = foi base ifam1 in
       let fam2 = foi base ifam2 in
       merge_fam conf base (ifam1, fam1) (ifam2, fam2)

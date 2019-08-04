@@ -1,5 +1,7 @@
 opam-version: "2.0"
 
+synopsis: "Genealogy library and software"
+
 maintainer: [ "Julien Sagot <julien.sagot@geneanet.org>" ]
 
 authors: [ "Daniel de Rauglaudre" ]
@@ -11,40 +13,38 @@ dev-repo: "git://github.com/geneweb/geneweb"
 bug-reports: "https://github.com/geneweb/geneweb/issues"
 
 build: [
-  [ "./configure" "--api" ]
-  [ make "install-exe" ]
+  [ "./configure" ]
+  [ make "exe" ]
 ]
 
 install: [
-  [ "./configure" "--api" ]
+  [ "./configure" ]
   [ make "install" ]
 ]
 
 remove: [
-  [ "./configure" "--api" ]
+  [ "./configure" ]
   [ make "uninstall" ]
 ]
 
-pin-depends: [
-  [ "markup.dev" "git://github.com/geneanet/markup.ml" ]
-]
-
 depends: [
+  "benchmark" { with-test }
   "camlp5" { build }
   "cppo" { build }
-  "dune" { build>= "1.1.1" }
+  "dune" { build >= "1.1.1" }
   "markup"
   "ocaml" { >= "4.05" }
-  "ocurl" { = "0.8.1" }
-  "ounit"
+  "ounit" { with-test }
+  "stdlib-shims"
+]
+
+depopts: [
+  "num"
+  "ocurl"
   "piqi"
   "piqilib"
   "redis"
   "redis-sync"
   "yojson"
-]
-
-depexts: [
-  [ [ "ubuntu" "linux" ] [ "protobuf-compiler" ] ]
-  [ [ "homebrew" "osx" ] [ "protobuf" ] ]
+  "zarith"
 ]

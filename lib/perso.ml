@@ -1,4 +1,3 @@
-(* $Id: perso.ml,v 5.82 2007-09-12 09:58:44 ddr Exp $ *)
 (* Copyright (c) 1998-2007 INRIA *)
 
 #ifdef API
@@ -15,17 +14,17 @@ let max_im_wid = 240
 let round_2_dec x = floor (x *. 100.0 +. 0.5) /. 100.0
 
 let has_children base u =
-  List.exists
+  Array.exists
     (fun ifam ->
        let des = foi base ifam in Array.length (get_children des) > 0)
-    (Array.to_list (get_family u))
+    (get_family u)
 
 let string_of_marriage_text conf base fam =
   let marriage = Adef.od_of_cdate (get_marriage fam) in
   let marriage_place = sou base (get_marriage_place fam) in
   let s =
     match marriage with
-      Some d -> " " ^ Date.string_of_ondate conf d
+      Some d -> " " ^ DateDisplay.string_of_ondate conf d
     | _ -> ""
   in
   match marriage_place with
@@ -90,7 +89,7 @@ let string_of_title conf base and_txt p (nth, name, title, places, dates) =
         (fun first (date_start, date_end) ->
            if not first then Buffer.add_string b ",\n";
            begin match date_start with
-             Some d -> Buffer.add_string b (Date.string_of_date conf d)
+             Some d -> Buffer.add_string b (DateDisplay.string_of_date conf d)
            | None -> ()
            end;
            begin match date_end with
@@ -101,7 +100,7 @@ let string_of_title conf base and_txt p (nth, name, title, places, dates) =
            | _ -> ()
            end;
            begin match date_end with
-             Some d -> Buffer.add_string b (Date.string_of_date conf d)
+             Some d -> Buffer.add_string b (DateDisplay.string_of_date conf d)
            | None -> ()
            end;
            false)
@@ -146,10 +145,6 @@ let nobility_titles_list conf base p =
        | _ -> (t_nth, t_name, t_ident, [t_place], t_dates) :: l)
     titles []
 
-let string_of_num sep num =
-  let len = ref 0 in
-  Sosa.print (fun x -> len := Buff.mstore !len x) sep num; Buff.get !len
-
 let print_base_loop conf base p =
   Wserver.printf
     (fcapitale (ftransl conf "loop in database: %s is his/her own ancestor"))
@@ -165,10 +160,10 @@ let print_base_loop conf base p =
 
 (* Type pour ne pas créer à chaque fois un tableau tstab et mark *)
 type sosa_t =
-  { tstab : int array;
-    mark : bool array;
-    mutable last_zil : (Def.iper * Sosa.t) list;
-    sosa_ht : (Def.iper, (Sosa.t * Gwdb.person) option) Hashtbl.t }
+  { tstab : (iper, int) Gwdb.Marker.t;
+    mark : (iper, bool) Gwdb.Marker.t;
+    mutable last_zil : (iper * Sosa.t) list;
+    sosa_ht : (iper, (Sosa.t * Gwdb.person) option) Hashtbl.t }
 
 let init_sosa_t conf base sosa_ref =
   let tstab =
@@ -177,11 +172,12 @@ let init_sosa_t conf base sosa_ref =
         let title _ = Wserver.printf "%s" (capitale (transl conf "error")) in
         Hutil.rheader conf title; print_base_loop conf base p
   in
-  let mark = Array.make (nb_of_persons base) false in
-  let last_zil = [get_key_index sosa_ref, Sosa.one] in
+  let persons = Gwdb.ipers base in
+  let mark = Gwdb.iper_marker persons false in
+  let last_zil = [get_iper sosa_ref, Sosa.one] in
   let sosa_ht = Hashtbl.create 5003 in
   let () =
-    Hashtbl.add sosa_ht (get_key_index sosa_ref) (Some (Sosa.one, sosa_ref))
+    Hashtbl.add sosa_ht (get_iper sosa_ref) (Some (Sosa.one, sosa_ref))
   in
   {tstab = tstab; mark = mark; last_zil = last_zil; sosa_ht = sosa_ht}
 
@@ -198,13 +194,13 @@ let find_sosa_aux conf base a p t_sosa =
       [] -> Left []
     | (ip, z) :: zil ->
         let _ = cache := (ip, z) :: !cache in
-        if ip = get_key_index a then Right z
-        else if t_sosa.mark.(Adef.int_of_iper ip) then gene_find zil
+        if ip = get_iper a then Right z
+        else if Gwdb.Marker.get t_sosa.mark ip then gene_find zil
         else
           begin
-            t_sosa.mark.(Adef.int_of_iper ip) <- true;
-            if t_sosa.tstab.(Adef.int_of_iper (get_key_index a)) <=
-                 t_sosa.tstab.(Adef.int_of_iper ip)
+            Gwdb.Marker.set t_sosa.mark ip true;
+            if Gwdb.Marker.get t_sosa.tstab (get_iper a)
+               <= Gwdb.Marker.get t_sosa.tstab ip
             then
               let _ = has_ignore := true in gene_find zil
             else
@@ -232,7 +228,7 @@ let find_sosa_aux conf base a p t_sosa =
       Left [] ->
         let _ =
           List.iter
-            (fun (ip, _) -> Array.set t_sosa.mark (Adef.int_of_iper ip) false)
+            (fun (ip, _) -> Gwdb.Marker.set t_sosa.mark ip false)
             !cache
         in
         None
@@ -250,7 +246,7 @@ let find_sosa_aux conf base a p t_sosa =
     | Right z ->
         let _ =
           List.iter
-            (fun (ip, _) -> Array.set t_sosa.mark (Adef.int_of_iper ip) false)
+            (fun (ip, _) -> Gwdb.Marker.set t_sosa.mark ip false)
             !cache
         in
         Some (z, p)
@@ -260,31 +256,16 @@ let find_sosa_aux conf base a p t_sosa =
 let find_sosa conf base a sosa_ref_l t_sosa =
   match Lazy.force sosa_ref_l with
     Some p ->
-      if get_key_index a = get_key_index p then Some (Sosa.one, p)
+      if get_iper a = get_iper p then Some (Sosa.one, p)
       else
-        let u = pget conf base (get_key_index a) in
+        let u = pget conf base (get_iper a) in
         if has_children base u then
-          try Hashtbl.find t_sosa.sosa_ht (get_key_index a) with
+          try Hashtbl.find t_sosa.sosa_ht (get_iper a) with
             Not_found -> find_sosa_aux conf base a p t_sosa
         else None
   | None -> None
 
-let rec get_p_of_sosa conf base s p =
-  if Sosa.eq s Sosa.one then (Some p)
-  else
-    let ns = Sosa.sosa_gen_up s in
-    let c = Sosa.branch s in
-    match get_parents p with
-      | Some ifam ->
-          let cpl = foi base ifam in
-          let pm = pget conf base (get_mother cpl) in
-          let pf = pget conf base (get_father cpl) in
-          if c = '0' then get_p_of_sosa conf base ns pf
-          else get_p_of_sosa conf base ns pm
-      | None -> None
-
-
-(* [Type]: (Def.iper, Sosa.t) Hashtbl.t *)
+(* [Type]: (iper, Sosa.t) Hashtbl.t *)
 let sosa_ht = Hashtbl.create 5003
 
 (* ************************************************************************ *)
@@ -305,14 +286,15 @@ let build_sosa_tree_ht conf base person =
   let () = load_ascends_array base in
   let () = load_couples_array base in
   let nb_persons = nb_of_persons base in
-  let mark = Array.make nb_persons false in
+  let ipers = Gwdb.ipers base in
+  let mark = Gwdb.iper_marker ipers false in
   (* Tableau qui va socker au fur et à mesure les ancêtres du person. *)
   (* Attention, on créé un tableau de la longueur de la base + 1 car on *)
   (* commence à l'indice 1 !                                            *)
   let sosa_accu =
-    Array.make (nb_persons + 1) (Sosa.zero, Adef.iper_of_int 0)
+    Array.make (nb_persons + 1) (Sosa.zero, dummy_iper)
   in
-  let () = Array.set sosa_accu 1 (Sosa.one, get_key_index person) in
+  let () = Array.set sosa_accu 1 (Sosa.one, get_iper person) in
   let rec loop i len =
     if i > nb_persons then ()
     else
@@ -330,20 +312,19 @@ let build_sosa_tree_ht conf base person =
               let cpl = foi base ifam in
               let z = Sosa.twice sosa_num in
               let len =
-                if not mark.(Adef.int_of_iper (get_father cpl)) then
+                if not @@ Gwdb.Marker.get mark (get_father cpl) then
                   begin
                     Array.set sosa_accu (len + 1) (z, get_father cpl);
-                    mark.(Adef.int_of_iper (get_father cpl)) <- true;
+                    Gwdb.Marker.set mark (get_father cpl) true;
                     len + 1
                   end
                 else len
               in
               let len =
-                if not mark.(Adef.int_of_iper (get_mother cpl)) then
+                if not @@ Gwdb.Marker.get mark (get_mother cpl) then
                   begin
-                    Array.set sosa_accu (len + 1)
-                      (Sosa.inc z 1, get_mother cpl);
-                    mark.(Adef.int_of_iper (get_mother cpl)) <- true;
+                    Array.set sosa_accu (len + 1) (Sosa.inc z 1, get_mother cpl);
+                    Gwdb.Marker.set mark (get_mother cpl) true ;
                     len + 1
                   end
                 else len
@@ -384,10 +365,10 @@ let next_sosa s =
   let sosa_list = Hashtbl.fold (fun k v acc -> (v, k) :: acc) sosa_ht [] in
   let sosa_list = List.sort (fun (s1, _) (s2, _) -> compare s1 s2) sosa_list in
   let rec find_n x lst = match lst with
-    | [] -> (Sosa.zero, Adef.iper_of_int 0)
+    | [] -> (Sosa.zero, dummy_iper)
     | (so, _) :: tl ->
         if (Sosa.eq so x) then
-          if tl = [] then (Sosa.zero, Adef.iper_of_int 0) else List.hd tl
+          if tl = [] then (Sosa.zero, dummy_iper) else List.hd tl
         else find_n x tl
   in
   let (so, ip) = find_n s sosa_list in
@@ -398,10 +379,10 @@ let prev_sosa s =
   let sosa_list = List.sort (fun (s1, _) (s2, _) -> compare s1 s2) sosa_list in
   let sosa_list = List.rev sosa_list in
   let rec find_n x lst = match lst with
-    | [] -> (Sosa.zero, Adef.iper_of_int 0)
+    | [] -> (Sosa.zero, dummy_iper)
     | (so, _) :: tl ->
         if (Sosa.eq so x) then
-          if tl = [] then (Sosa.zero, Adef.iper_of_int 0) else List.hd tl
+          if tl = [] then (Sosa.zero, dummy_iper) else List.hd tl
         else find_n x tl
   in
   let (so, ip) = find_n s sosa_list in
@@ -421,7 +402,7 @@ let prev_sosa s =
     [Rem] : Exporté en clair hors de ce module.                         *)
 (* ******************************************************************** *)
 let get_sosa_person p =
-  try Hashtbl.find sosa_ht (get_key_index p) with Not_found -> Sosa.zero
+  try Hashtbl.find sosa_ht (get_iper p) with Not_found -> Sosa.zero
 
 (* ********************************************************************** *)
 (*  [Fonc] has_history : config -> string -> bool                         *)
@@ -491,8 +472,8 @@ let print_sosa conf base p link =
         if conf.cancel_links || not link then ()
         else
           begin let sosa_link =
-            let i1 = string_of_int (Adef.int_of_iper (get_key_index p)) in
-            let i2 = string_of_int (Adef.int_of_iper (get_key_index ref)) in
+            let i1 = string_of_iper (get_iper p) in
+            let i2 = string_of_iper (get_iper ref) in
             let b2 = Sosa.to_string sosa_num in
             "m=RL&i1=" ^ i1 ^ "&i2=" ^ i2 ^ "&b1=1&b2=" ^ b2
           in
@@ -510,7 +491,7 @@ let print_sosa conf base p link =
             Printf.sprintf (fcapitale (ftransl conf "direct ancestor of %s"))
               direct_ancestor ^
             Printf.sprintf ", Sosa: %s"
-              (string_of_num (transl conf "(thousand separator)") sosa_num)
+              (Sosa.to_string_sep (transl conf "(thousand separator)") sosa_num)
         in
         Wserver.printf "<img src=\"%s/sosa.png\" alt=\"sosa\" title=\"%s\"/> "
           (image_prefix conf) title;
@@ -553,8 +534,8 @@ let get_death_text conf p p_auth =
         let d = Adef.date_of_cdate d in
         begin match p_getenv conf.base_env "long_date" with
           Some "yes" ->
-            Date.string_of_ondate tmp_conf d ^ Date.get_wday tmp_conf d
-        | _ -> Date.string_of_ondate tmp_conf d
+            DateDisplay.string_of_ondate tmp_conf d ^ DateDisplay.get_wday tmp_conf d
+        | _ -> DateDisplay.string_of_ondate tmp_conf d
         end
     | _ -> ""
   in
@@ -583,8 +564,8 @@ let get_baptism_text conf p p_auth =
       true, Some d ->
         begin match p_getenv conf.base_env "long_date" with
           Some "yes" ->
-            Date.string_of_ondate tmp_conf d ^ Date.get_wday tmp_conf d
-        | _ -> Date.string_of_ondate tmp_conf d
+            DateDisplay.string_of_ondate tmp_conf d ^ DateDisplay.get_wday tmp_conf d
+        | _ -> DateDisplay.string_of_ondate tmp_conf d
         end
     | _ -> ""
   in
@@ -613,8 +594,8 @@ let get_birth_text conf p p_auth =
       true, Some d ->
         begin match p_getenv conf.base_env "long_date" with
           Some "yes" ->
-            Date.string_of_ondate tmp_conf d ^ Date.get_wday tmp_conf d
-        | _ -> Date.string_of_ondate tmp_conf d
+            DateDisplay.string_of_ondate tmp_conf d ^ DateDisplay.get_wday tmp_conf d
+        | _ -> DateDisplay.string_of_ondate tmp_conf d
         end
     | _ -> ""
   in
@@ -637,8 +618,8 @@ let get_marriage_date_text conf fam p_auth =
     true, Some d ->
       begin match p_getenv conf.base_env "long_date" with
         Some "yes" ->
-          Date.string_of_ondate tmp_conf d ^ Date.get_wday tmp_conf d
-      | _ -> Date.string_of_ondate tmp_conf d
+          DateDisplay.string_of_ondate tmp_conf d ^ DateDisplay.get_wday tmp_conf d
+      | _ -> DateDisplay.string_of_ondate tmp_conf d
       end
   | _ -> ""
 
@@ -667,8 +648,8 @@ let get_burial_text conf p p_auth =
           true, Some d ->
             begin match p_getenv conf.base_env "long_date" with
               Some "yes" ->
-                Date.string_of_ondate tmp_conf d ^ Date.get_wday tmp_conf d
-            | _ -> Date.string_of_ondate tmp_conf d
+                DateDisplay.string_of_ondate tmp_conf d ^ DateDisplay.get_wday tmp_conf d
+            | _ -> DateDisplay.string_of_ondate tmp_conf d
             end
         | _ -> ""
         end
@@ -701,8 +682,8 @@ let get_cremation_text conf p p_auth =
           true, Some d ->
             begin match p_getenv conf.base_env "long_date" with
               Some "yes" ->
-                Date.string_of_ondate tmp_conf d ^ Date.get_wday tmp_conf d
-            | _ -> Date.string_of_ondate tmp_conf d
+                DateDisplay.string_of_ondate tmp_conf d ^ DateDisplay.get_wday tmp_conf d
+            | _ -> DateDisplay.string_of_ondate tmp_conf d
             end
         | _ -> ""
         end
@@ -712,7 +693,7 @@ let get_cremation_text conf p p_auth =
 
 let max_ancestor_level conf base ip max_lev =
   let x = ref 0 in
-  let mark = Array.make (nb_of_persons base) false in
+  let mark = Gwdb.iper_marker (Gwdb.ipers base) false in
 #ifdef API
   (* Charge le cache des LIA. *)
   (* On limite à 10 le nombre de générations ascendantes à charger pour les LIA. *)
@@ -721,16 +702,13 @@ let max_ancestor_level conf base ip max_lev =
   let rec loop level ip =
     (* Ne traite pas l'index s'il a déjà été traité. *)
     (* Pose surement probleme pour des implexes. *)
-    if mark.(Adef.int_of_iper ip) then ()
-    else
-      begin
+    if not @@ Gwdb.Marker.get mark ip then begin
         (* Met à jour le tableau d'index pour indiquer que l'index est traité. *)
-        mark.(Adef.int_of_iper ip) <- true;
+        Gwdb.Marker.set mark ip true ;
         x := max !x level;
-        if !x = max_lev then ()
-        else
+        if !x <> max_lev then
           match get_parents (pget conf base ip) with
-            Some ifam ->
+          | Some ifam ->
               let cpl = foi base ifam in
               loop (succ level) (get_father cpl);
               loop (succ level) (get_mother cpl)
@@ -744,10 +722,8 @@ let max_ancestor_level conf base ip max_lev =
                   match Perso_link.get_parents_link base_prefix ip with
                     Some family ->
                       let (ifath, imoth, base_prefix) =
-                        Adef.iper_of_int
-                          (Int32.to_int family.MLink.Family.ifath),
-                        Adef.iper_of_int
-                          (Int32.to_int family.MLink.Family.imoth),
+                        Gwdb.iper_of_string @@ Int32.to_string family.MLink.Family.ifath,
+                        Gwdb.iper_of_string @@ Int32.to_string family.MLink.Family.imoth,
                         family.MLink.Family.baseprefix
                       in
                       if Perso_link.get_person_link base_prefix ifath <> None
@@ -771,7 +747,7 @@ let max_cousin_level conf base p =
     try int_of_string (List.assoc "max_cousins_level" conf.base_env) with
       Not_found | Failure _ -> default_max_cousin_lev
   in
-  max_ancestor_level conf base (get_key_index p) max_lev + 1
+  max_ancestor_level conf base (get_iper p) max_lev + 1
 
 let limit_desc conf =
   match p_getint conf.base_env "max_desc_level" with
@@ -789,10 +765,10 @@ let make_desc_level_table conf base max_level p =
   in
   (* the table 'levt' may be not necessary, since I added 'flevt'; kept
      because '%max_desc_level;' is still used... *)
-  let levt = Array.make (nb_of_persons base) infinite in
-  let flevt = Array.make (nb_of_families base) infinite in
+  let levt = Gwdb.iper_marker (Gwdb.ipers base) infinite in
+  let flevt = Gwdb.ifam_marker (Gwdb.ifams base) infinite in
   let get = pget conf base in
-  let ini_ip = get_key_index p in
+  let ini_ip = get_iper p in
   let rec fill lev =
     function
       [] -> ()
@@ -800,23 +776,23 @@ let make_desc_level_table conf base max_level p =
         let new_ipl =
           List.fold_left
             (fun ipl ip ->
-               if levt.(Adef.int_of_iper ip) <= lev then ipl
+               if Gwdb.Marker.get levt ip <= lev then ipl
                else if lev <= max_level then
                  begin
-                   levt.(Adef.int_of_iper ip) <- lev;
+                   Gwdb.Marker.set levt ip lev ;
                    let down =
                      if ip = ini_ip then true
                      else
                        match line with
-                         Male -> get_sex (pget conf base ip) <> Female
+                       | Male -> get_sex (pget conf base ip) <> Female
                        | Female -> get_sex (pget conf base ip) <> Male
                        | Neuter -> true
                    in
                    if down then
                      Array.fold_left
                        (fun ipl ifam ->
-                          if flevt.(Adef.int_of_ifam ifam) <= lev then ()
-                          else flevt.(Adef.int_of_ifam ifam) <- lev;
+                          if not (Gwdb.Marker.get flevt ifam <= lev)
+                          then Gwdb.Marker.set flevt ifam lev ;
                           let ipa = get_children (foi base ifam) in
                           Array.fold_left (fun ipl ip -> ip :: ipl) ipl ipa)
                        ipl (get_family (get ip))
@@ -827,18 +803,18 @@ let make_desc_level_table conf base max_level p =
         in
         fill (succ lev) new_ipl
   in
-  fill 0 [ini_ip]; levt, flevt
+  fill 0 [ini_ip];
+  levt, flevt
 
-let desc_level_max desc_level_table_l =
+let desc_level_max base desc_level_table_l =
   let (levt, _) = Lazy.force desc_level_table_l in
-  let x = ref 0 in
-  for i = 0 to Array.length levt - 1 do
-    let lev = levt.(i) in if lev != infinite && !x < lev then x := lev
-  done;
-  !x
+  Gwdb.Collection.fold (fun acc i ->
+      let lev = Gwdb.Marker.get levt i in
+      if lev != infinite && acc < lev then lev else acc
+    ) 0 (Gwdb.ipers base)
 
-let max_descendant_level desc_level_table_l =
-  desc_level_max desc_level_table_l
+let max_descendant_level base desc_level_table_l =
+  desc_level_max base desc_level_table_l
 
 (* ancestors by list *)
 
@@ -881,9 +857,8 @@ let next_generation conf base mark gpl =
       (fun gpl gp ->
          match gp with
            GP_person (n, ip, _) ->
-             let i = Adef.int_of_iper ip in
-             let m = mark.(i) in
-             if Sosa.eq m Sosa.zero then begin mark.(i) <- n; gp :: gpl end
+             let m = Gwdb.Marker.get mark ip in
+             if Sosa.eq m Sosa.zero then begin Gwdb.Marker.set mark ip n; gp :: gpl end
              else GP_same (n, m, ip) :: gpl
          | _ -> gp :: gpl)
       [] gpl
@@ -962,7 +937,7 @@ let get_all_generations conf base p =
       Some v -> v
     | None -> 0
   in
-  let mark = Array.make (nb_of_persons base) Sosa.zero in
+  let mark = Gwdb.iper_marker (Gwdb.ipers base) Sosa.zero in
   let rec get_generations level gpll gpl =
     let gpll = gpl :: gpll in
     if level < max_level then
@@ -973,7 +948,7 @@ let get_all_generations conf base p =
     else gpll
   in
   let gpll =
-    get_generations 1 [] [GP_person (Sosa.one, get_key_index p, None)]
+    get_generations 1 [] [GP_person (Sosa.one, get_iper p, None)]
   in
   let gpll = List.rev gpll in List.flatten gpll
 
@@ -1047,11 +1022,11 @@ let tree_generation_list conf base gv p =
                  let cpl = foi base ifam in
                  let fath =
                    let p = pget conf base (get_father cpl) in
-                   if know base p then Some p else None
+                   if not @@ is_empty_name p then Some p else None
                  in
                  let moth =
                    let p = pget conf base (get_mother cpl) in
-                   if know base p then Some p else None
+                   if not @@ is_empty_name p then Some p else None
                  in
                  let fo = Some ifam in
                  let base_prefix = conf.bname in
@@ -1068,16 +1043,13 @@ let tree_generation_list conf base gv p =
              | _ ->
 #ifdef API
                  match
-                   Perso_link.get_parents_link base_prefix (get_key_index p)
+                   Perso_link.get_parents_link base_prefix (get_iper p)
                  with
                    Some family ->
                      let (ifath, imoth, ifam) =
-                       Adef.iper_of_int
-                         (Int32.to_int family.MLink.Family.ifath),
-                       Adef.iper_of_int
-                         (Int32.to_int family.MLink.Family.imoth),
-                       Adef.ifam_of_int
-                         (Int32.to_int family.MLink.Family.ifam)
+                       Gwdb.iper_of_string @@ Int32.to_string family.MLink.Family.ifath,
+                       Gwdb.iper_of_string @@ Int32.to_string family.MLink.Family.imoth,
+                       Gwdb.ifam_of_string @@ Int32.to_string family.MLink.Family.ifam
                      in
                      begin match
                        Perso_link.get_person_link
@@ -1090,13 +1062,13 @@ let tree_generation_list conf base gv p =
                            Perso_link.make_ep_link base fath
                          in
                          let fath =
-                           if know base fath then Some fath else None
+                           if not @@ is_empty_name fath then Some fath else None
                          in
                          let (moth, _) =
                            Perso_link.make_ep_link base moth
                          in
                          let moth =
-                           if know base moth then Some moth else None
+                           if not @@ is_empty_name moth then Some moth else None
                          in
                          let fo = Some ifam in
                          let base_prefix = family.MLink.Family.baseprefix in
@@ -1115,7 +1087,7 @@ let tree_generation_list conf base gv p =
                            Perso_link.make_ep_link base fath
                          in
                          let fath =
-                           if know base fath then Some fath else None
+                           if not @@ is_empty_name fath then Some fath else None
                          in
                          let fo = Some ifam in
                          let base_prefix = family.MLink.Family.baseprefix in
@@ -1129,7 +1101,7 @@ let tree_generation_list conf base gv p =
                            Perso_link.make_ep_link base moth
                          in
                          let moth =
-                           if know base moth then Some moth else None
+                           if not @@ is_empty_name moth then Some moth else None
                          in
                          let fo = Some ifam in
                          let base_prefix = family.MLink.Family.baseprefix in
@@ -1170,11 +1142,11 @@ let get_date_place conf base auth_for_all_anc p =
     let d1 =
       if d1 <> None then d1
       else
-        List.fold_left
+        Array.fold_left
           (fun d ifam ->
              if d <> None then d
              else Adef.od_of_cdate (get_marriage (foi base ifam)))
-          d1 (Array.to_list (get_family p))
+          d1 (get_family p)
     in
     let d2 =
       match get_death p with
@@ -1190,7 +1162,7 @@ let get_date_place conf base auth_for_all_anc p =
       else
         match d2 with
           Some (Dgreg (d, _)) ->
-            let a = CheckItem.time_elapsed d conf.today in
+            let a = Date.time_elapsed d conf.today in
             Util.strictly_after_private_years conf a
         | _ -> false
     in
@@ -1202,11 +1174,11 @@ let get_date_place conf base auth_for_all_anc p =
       let pl = if pl <> "" then pl else sou base (get_burial_place p) in
       if pl <> "" then pl
       else
-        List.fold_left
+        Array.fold_left
           (fun pl ifam ->
              if pl <> "" then pl
              else sou base (get_marriage_place (foi base ifam)))
-          pl (Array.to_list (get_family p))
+          pl (get_family p)
     in
     (d1, d2, pl), auth_for_all_anc
   else (None, None, ""), false
@@ -1217,9 +1189,9 @@ type dup =
     DupFam of ifam * ifam
   | DupInd of iper * iper
   | NoDup
-type excl_dup = (Adef.iper * Adef.iper) list * (Adef.ifam * Adef.ifam) list
+type excl_dup = (iper * iper) list * (ifam * ifam) list
 
-let gen_excluded_possible_duplications conf s i_of_int =
+let gen_excluded_possible_duplications conf s i_of_string =
   match p_getenv conf.env s with
     Some s ->
       let rec loop ipl i =
@@ -1237,12 +1209,8 @@ let gen_excluded_possible_duplications conf s i_of_int =
             let s1 = String.sub s i (j - i) in
             let s2 = String.sub s (j + 1) (k - j - 1) in
             let ipl =
-              match
-                try Some (int_of_string s1, int_of_string s2) with
-                  Failure _ -> None
-              with
-                Some (i1, i2) -> (i_of_int i1, i_of_int i2) :: ipl
-              | None -> ipl
+              try (i_of_string s1, i_of_string s2) :: ipl
+              with _ -> ipl
             in
             loop ipl (k + 1)
       in
@@ -1250,8 +1218,8 @@ let gen_excluded_possible_duplications conf s i_of_int =
   | None -> []
 
 let excluded_possible_duplications conf =
-  gen_excluded_possible_duplications conf "iexcl" Adef.iper_of_int,
-  gen_excluded_possible_duplications conf "fexcl" Adef.ifam_of_int
+  gen_excluded_possible_duplications conf "iexcl" iper_of_string,
+  gen_excluded_possible_duplications conf "fexcl" ifam_of_string
 
 let first_possible_duplication base ip (iexcl, fexcl) =
   let ifaml = Array.to_list (get_family (poi base ip)) in
@@ -1290,14 +1258,12 @@ let first_possible_duplication base ip (iexcl, fexcl) =
   if cand_spouse <> NoDup then cand_spouse
   else
     let ipl =
-      let rec loop =
-        function
-          ifam :: ifaml ->
-            let ipl = Array.to_list (get_children (foi base ifam)) in
-            ipl @ loop ifaml
-        | [] -> []
-      in
-      loop ifaml
+      List.rev @@
+      List.fold_left
+        (fun acc x ->
+           Array.fold_left
+             (fun acc x -> x :: acc) acc (get_children (foi base x)))
+        [] ifaml
     in
     let rec loop_chil =
       function
@@ -1319,7 +1285,7 @@ let first_possible_duplication base ip (iexcl, fexcl) =
     loop_chil ipl
 
 let has_possible_duplications conf base p =
-  let ip = get_key_index p in
+  let ip = get_iper p in
   let excl = excluded_possible_duplications conf in
   first_possible_duplication base ip excl <> NoDup
 
@@ -1348,12 +1314,11 @@ let merge_date_place conf base surn ((d1, d2, pl), auth) p =
 let build_surnames_list conf base v p =
   let ht = Hashtbl.create 701 in
   let mark =
-    try
-      let n =
-        int_of_string (List.assoc "max_ancestor_implex" conf.base_env)
-      in
-      Array.make (nb_of_persons base) n
-    with Not_found | Failure _ -> Array.make (nb_of_persons base) 5
+    let n =
+      try int_of_string (List.assoc "max_ancestor_implex" conf.base_env)
+      with _ -> 5
+    in
+    Gwdb.iper_marker (Gwdb.ipers base) n
   in
   let auth = conf.wizard || conf.friend in
   let add_surname sosa p surn dp =
@@ -1364,14 +1329,14 @@ let build_surnames_list conf base v p =
     r := fst !r, sosa :: snd !r
   in
   let rec loop lev sosa p surn dp =
-    if mark.(Adef.int_of_iper (get_key_index p)) = 0 then ()
+    if Gwdb.Marker.get mark (get_iper p) = 0 then ()
     else if lev = v then
       if is_hide_names conf p && not (authorized_age conf base p) then ()
       else add_surname sosa p surn dp
     else
       begin
-        mark.(Adef.int_of_iper (get_key_index p)) <-
-          mark.(Adef.int_of_iper (get_key_index p)) - 1;
+        Gwdb.Marker.set mark
+          (get_iper p) (Gwdb.Marker.get mark (get_iper p) - 1) ;
         match get_parents p with
           Some ifam ->
             let cpl = foi base ifam in
@@ -1429,7 +1394,7 @@ let build_surnames_list conf base v p =
 (* ************************************************************************* *)
 let build_list_eclair conf base v p =
   let ht = Hashtbl.create 701 in
-  let mark = Array.make (nb_of_persons base) false in
+  let mark = Gwdb.iper_marker (Gwdb.ipers base) false in
   (* Fonction d'ajout dans la Hashtbl. A la clé (surname, place) on associe *)
   (* la personne (pour l'interprétation dans le template), la possible date *)
   (* de début, la possible date de fin, la liste des personnes/évènements.  *)
@@ -1464,15 +1429,15 @@ let build_list_eclair conf base v p =
                  end
              | None -> d
            in
-           pp, db, de, get_key_index p :: l)
+           pp, db, de, get_iper p :: l)
           p !r
   in
   (* Fonction d'ajout de tous les évènements d'une personne (birth, bapt...). *)
   let add_person p surn =
-    if mark.(Adef.int_of_iper (get_key_index p)) then ()
+    if Gwdb.Marker.get mark (get_iper p) then ()
     else
       begin
-        mark.(Adef.int_of_iper (get_key_index p)) <- true;
+        Gwdb.Marker.set mark (get_iper p) true;
         add_surname p surn (get_birth_place p)
           (Adef.od_of_cdate (get_birth p));
         add_surname p surn (get_baptism_place p)
@@ -1489,12 +1454,12 @@ let build_list_eclair conf base v p =
           | _ -> None
         in
         add_surname p surn (get_burial_place p) burial;
-        List.iter
+        Array.iter
           (fun ifam ->
              let fam = foi base ifam in
              add_surname p surn (get_marriage_place fam)
                (Adef.od_of_cdate (get_marriage fam)))
-          (Array.to_list (get_family p))
+          (get_family p)
       end
   in
   (* Parcours les ascendants de p et les ajoute dans la Hashtbl. *)
@@ -1607,9 +1572,7 @@ let links_to_ind conf base db key =
              NotesLinks.PgInd ip ->
                authorized_age conf base (pget conf base ip)
            | NotesLinks.PgFam ifam ->
-               let fam = foi base ifam in
-               if is_deleted_family fam then false
-               else authorized_age conf base (pget conf base (get_father fam))
+               authorized_age conf base (pget conf base (get_father @@ foi base ifam))
            | NotesLinks.PgNotes | NotesLinks.PgMisc _ |
              NotesLinks.PgWizard _ ->
                true
@@ -1632,7 +1595,7 @@ let rec compare_ls sl1 sl2 =
       (* soit plus petit que "2". J'espère qu'on ne casse pas  *)
       (* les performances à cause du try..with.                *)
       let c =
-        try Pervasives.compare (int_of_string s1) (int_of_string s2) with
+        try Stdlib.compare (int_of_string s1) (int_of_string s2) with
           Failure _ -> Gutil.alphabetic_order s1 s2
       in
       if c = 0 then compare_ls sl1 sl2 else c
@@ -1644,13 +1607,7 @@ module SortedList =
   Set.Make (struct type t = string list let compare = compare_ls end)
 
 module IperSet =
-  Set.Make
-    (struct
-       type t = iper
-       let compare i1 i2 =
-         Pervasives.compare (Adef.int_of_iper i1) (Adef.int_of_iper i2)
-     end)
-
+  Set.Make (struct type t = iper let compare = compare end)
 
 (*
    Type pour représenté soit :
@@ -1673,8 +1630,8 @@ type 'a env =
   | Vcell of cell
   | Vcelll of cell list
   | Vcnt of int ref
-  | Vdesclevtab of (int array * int array) Lazy.t
-  | Vdmark of bool array ref
+  | Vdesclevtab of ((iper, int) Marker.t * (ifam, int) Marker.t) lazy_t
+  | Vdmark of (iper, bool) Marker.t ref
   | Vslist of SortedList.t ref
   | Vslistlm of string list list
   | Vind of person
@@ -1687,7 +1644,7 @@ type 'a env =
   | Vstring of string
   | Vsosa_ref of person option Lazy.t
   | Vsosa of (iper * (Sosa.t * person) option) list ref
-  | Vt_sosa of sosa_t
+  | Vt_sosa of sosa_t option
   | Vtitle of person * title_item
   | Vevent of person * event_item
   | Vlazyp of string option ref
@@ -1770,18 +1727,18 @@ let string_of_image_medium_size = gen_string_of_img_sz 160 120
 let string_of_image_small_size = gen_string_of_img_sz 100 75
 
 let get_sosa conf base env r p =
-  try List.assoc (get_key_index p) !r with
+  try List.assoc (get_iper p) !r with
     Not_found ->
       let s =
         match get_env "sosa_ref" env with
           Vsosa_ref v ->
             begin match get_env "t_sosa" env with
-              Vt_sosa t_sosa -> find_sosa conf base p v t_sosa
-            | _ -> None
+              | Vt_sosa (Some t_sosa) -> find_sosa conf base p v t_sosa
+              | _ -> None
             end
         | _ -> None
       in
-      r := (get_key_index p, s) :: !r; s
+      r := (get_iper p, s) :: !r; s
 
 (* ************************************************************************** *)
 (*  [Fonc] get_linked_page : config -> base -> person -> string -> string     *)
@@ -1820,14 +1777,19 @@ let events_list conf base p =
         (get_pevents p) []
     else []
   in
+  let get_name = function
+    | (Pevent n, _, _, _, _, _, _) -> CheckItem.Psort n
+    | (Fevent n, _, _, _, _, _, _) -> CheckItem.Fsort n
+  in
+  let get_date (_, date, _, _, _, _, _) = date in
   let fevents =
     (* On conserve l'ordre des familles. *)
-    List.fold_right
+    Array.fold_right
       (fun ifam fevents ->
          let fam = foi base ifam in
          let ifath = get_father fam in
          let imoth = get_mother fam in
-         let isp = Gutil.spouse (get_key_index p) fam in
+         let isp = Gutil.spouse (get_iper p) fam in
          let m_auth =
            authorized_age conf base (pget conf base ifath) &&
            authorized_age conf base (pget conf base imoth)
@@ -1847,22 +1809,10 @@ let events_list conf base p =
                (get_fevents fam) []
            else []
          in
-         CheckItem.merge_events
-           ((fun (name, _, _, _, _, _, _) ->
-               match name with
-                 Fevent n -> CheckItem.Fsort n
-               | _ -> failwith "events_list"),
-            (fun (_, date, _, _, _, _, _) -> date))
-           fam_fevents fevents)
-      (Array.to_list (get_family p)) []
+         CheckItem.merge_events get_name get_date fam_fevents fevents)
+      (get_family p) []
   in
-  CheckItem.merge_events
-    ((fun (name, _, _, _, _, _, _) ->
-        match name with
-          Pevent n -> CheckItem.Psort n
-        | Fevent n -> CheckItem.Fsort n),
-     (fun (_, date, _, _, _, _, _) -> date))
-    pevents fevents
+  CheckItem.merge_events get_name get_date pevents fevents
 
 let make_ep conf base ip =
   let p = pget conf base ip in
@@ -1885,6 +1835,31 @@ let mode_local env =
   | Vfam _ -> false
   | _ -> true
 
+let get_note_source conf base env auth no_note note_source =
+  if auth && not no_note then
+    let s = string_with_macros conf env note_source in
+    let lines = Wiki.html_of_tlsw conf s in
+    let lines =
+      (* remove enclosing <p> .. </p> if any *)
+      if List.length lines > 2 then
+        match lines with
+        | "<p>" :: remain ->
+          if List.hd (List.rev remain) = "</p>"
+          then List.rev (List.tl (List.rev remain))
+          else lines
+        | _ -> lines
+      else lines
+    in
+    let wi =
+      {Wiki.wi_mode = "NOTES"; Wiki.wi_cancel_links = conf.cancel_links;
+       Wiki.wi_file_path = Notes.file_path conf base;
+       Wiki.wi_person_exists = person_exists conf base;
+       Wiki.wi_always_show_link = conf.wizard || conf.friend}
+    in
+    let s = Wiki.syntax_links conf wi (String.concat "\n" lines) in
+    Util.safe_html @@ if conf.pure_xhtml then Util.check_xhtml s else s
+  else ""
+
 let rec eval_var conf base env ep loc sl =
   try eval_simple_var conf base env ep sl with
     Not_found -> eval_compound_var conf base env ep loc sl
@@ -1896,70 +1871,38 @@ and eval_simple_var conf base env ep =
       end
   | _ -> raise Not_found
 and eval_simple_bool_var conf base env =
+  let fam_check_aux fn =
+    match get_env "fam" env with
+    | Vfam (_, fam, _, _) when mode_local env -> fn fam
+    | _ ->
+      match get_env "fam_link" env with
+      | Vfam (_, fam, _, _) -> fn fam
+      | _ -> raise Not_found
+  in
+  let check_relation test =
+    fam_check_aux (fun fam -> test @@ get_relation fam)
+  in
   function
-    "are_divorced" ->
-      begin match get_env "fam" env with
-        Vfam (_, fam, _, _) when mode_local env ->
-          begin match get_divorce fam with
-            Divorced _ -> true
-          | _ -> false
-          end
-      | _ ->
-          match get_env "fam_link" env with
-            Vfam (_, fam, _, _) ->
-              begin match get_divorce fam with
-                Divorced _ -> true
-              | _ -> false
-              end
-          | _ -> raise Not_found
-      end
+  | "are_divorced" ->
+    fam_check_aux (fun fam -> match get_divorce fam with Divorced _ -> true | _ -> false)
   | "are_engaged" ->
-      begin match get_env "fam" env with
-        Vfam (_, fam, _, _) when mode_local env -> get_relation fam = Engaged
-      | _ ->
-          match get_env "fam_link" env with
-            Vfam (_, fam, _, _) -> get_relation fam = Engaged
-          | _ -> raise Not_found
-      end
+    check_relation ((=) Engaged)
   | "are_married" ->
-      begin match get_env "fam" env with
-        Vfam (_, fam, _, _) when mode_local env ->
-          get_relation fam = Married || get_relation fam = NoSexesCheckMarried
-      | _ ->
-          match get_env "fam_link" env with
-            Vfam (_, fam, _, _) ->
-              get_relation fam = Married ||
-              get_relation fam = NoSexesCheckMarried
-          | _ -> raise Not_found
-      end
+    check_relation (function Married | NoSexesCheckMarried -> true | _ -> false)
   | "are_not_married" ->
-      begin match get_env "fam" env with
-        Vfam (_, fam, _, _) when mode_local env ->
-          get_relation fam = NotMarried ||
-          get_relation fam = NoSexesCheckNotMarried
-      | _ ->
-          match get_env "fam_link" env with
-            Vfam (_, fam, _, _) ->
-              get_relation fam = NotMarried ||
-              get_relation fam = NoSexesCheckNotMarried
-          | _ -> raise Not_found
-      end
+    check_relation (function NotMarried | NoSexesCheckNotMarried -> true | _ -> false)
+  | "are_pacs" ->
+    check_relation ((=) Pacs)
+  | "are_marriage_banns" ->
+    check_relation ((=) MarriageBann)
+  | "are_marriage_contract" ->
+    check_relation ((=) MarriageContract)
+  | "are_marriage_license" ->
+    check_relation ((=) MarriageLicense)
+  | "are_residence" ->
+    check_relation ((=) Residence)
   | "are_separated" ->
-      begin match get_env "fam" env with
-        Vfam (_, fam, _, _) when mode_local env ->
-          begin match get_divorce fam with
-            Separated -> true
-          | _ -> false
-          end
-      | _ ->
-          match get_env "fam_link" env with
-            Vfam (_, fam, _, _) ->
-              begin match get_divorce fam with
-                Separated -> true
-              | _ -> false
-              end
-          | _ -> raise Not_found
-      end
+    fam_check_aux (fun fam -> get_divorce fam = Separated)
   | "browsing_with_sosa_ref" ->
       begin match get_env "sosa_ref" env with
         Vsosa_ref v -> Lazy.force v <> None
@@ -2011,6 +1954,8 @@ and eval_simple_bool_var conf base env =
             Vfam (_, _, _, _) -> false
           | _ -> raise Not_found
       end
+
+
   | "is_first" ->
       begin match get_env "first" env with
         Vbool x -> x
@@ -2066,27 +2011,8 @@ and eval_simple_str_var conf base env (_, p_auth) =
   | "comment" | "fnotes" ->
       begin match get_env "fam" env with
         Vfam (_, fam, _, m_auth) ->
-          if m_auth && not conf.no_note then
-            let s = sou base (get_comment fam) in
-            let s = string_with_macros conf [] s in
-            let lines = Wiki.html_of_tlsw conf s in
-            let lines =
-              if List.length lines > 2 then
-                match lines with
-                | "<p>" :: remain -> List.rev (List.tl (List.rev remain))
-                | _ -> lines
-              else lines
-            in
-            let wi =
-              {Wiki.wi_mode = "NOTES";
-               Wiki.wi_cancel_links = conf.cancel_links;
-               Wiki.wi_file_path = Notes.file_path conf base;
-               Wiki.wi_person_exists = person_exists conf base;
-               Wiki.wi_always_show_link = conf.wizard || conf.friend}
-            in
-            let s = Wiki.syntax_links conf wi (String.concat "\n" lines) in
-            Util.safe_html @@ if conf.pure_xhtml then Util.check_xhtml s else s
-          else ""
+          get_note_source conf base [] m_auth conf.no_note 
+            (sou base (get_comment fam))
       | _ -> raise Not_found
       end
   | "count" ->
@@ -2114,9 +2040,9 @@ and eval_simple_str_var conf base env (_, p_auth) =
                 Some d when m_auth ->
                   begin match p_getenv conf.base_env "long_date" with
                     Some "yes" ->
-                      " <em>" ^ Date.string_of_ondate conf d ^
-                      Date.get_wday conf d ^ "</em>"
-                  | _ -> " <em>" ^ Date.string_of_ondate conf d ^ "</em>"
+                      " <em>" ^ DateDisplay.string_of_ondate conf d ^
+                      DateDisplay.get_wday conf d ^ "</em>"
+                  | _ -> " <em>" ^ DateDisplay.string_of_ondate conf d ^ "</em>"
                   end
               | _ -> ""
               end
@@ -2132,9 +2058,9 @@ and eval_simple_str_var conf base env (_, p_auth) =
                     Some d when m_auth ->
                       begin match p_getenv conf.base_env "long_date" with
                         Some "yes" ->
-                          " <em>" ^ Date.string_of_ondate conf d ^
-                          Date.get_wday conf d ^ "</em>"
-                      | _ -> " <em>" ^ Date.string_of_ondate conf d ^ "</em>"
+                          " <em>" ^ DateDisplay.string_of_ondate conf d ^
+                          DateDisplay.get_wday conf d ^ "</em>"
+                      | _ -> " <em>" ^ DateDisplay.string_of_ondate conf d ^ "</em>"
                       end
                   | _ -> ""
                   end
@@ -2149,7 +2075,7 @@ and eval_simple_str_var conf base env (_, p_auth) =
             Divorced d ->
               let d = Adef.od_of_cdate d in
               begin match d with
-                Some d when m_auth -> Date.string_slash_of_date conf d
+                Some d when m_auth -> DateDisplay.string_slash_of_date conf d
               | _ -> ""
               end
           | _ -> raise Not_found
@@ -2228,39 +2154,15 @@ and eval_simple_str_var conf base env (_, p_auth) =
   | "marriage_note" ->
       begin match get_env "fam" env with
         Vfam (_, fam, _, m_auth) ->
-          if m_auth && not conf.no_note then
-            let s = sou base (get_marriage_note fam) in
-            let s = string_with_macros conf [] s in
-            let lines = Wiki.html_of_tlsw conf s in
-            let wi =
-              {Wiki.wi_mode = "NOTES";
-               Wiki.wi_cancel_links = conf.cancel_links;
-               Wiki.wi_file_path = Notes.file_path conf base;
-               Wiki.wi_person_exists = person_exists conf base;
-               Wiki.wi_always_show_link = conf.wizard || conf.friend}
-            in
-            let s = Wiki.syntax_links conf wi (String.concat "\n" lines) in
-            Util.safe_html @@ if conf.pure_xhtml then Util.check_xhtml s else s
-          else ""
+          get_note_source conf base [] m_auth conf.no_note
+            (sou base (get_marriage_note fam))
       | _ -> raise Not_found
       end
   | "marriage_source" ->
       begin match get_env "fam" env with
         Vfam (_, fam, _, m_auth) ->
-          if m_auth then
-            let s = sou base (get_marriage_src fam) in
-            let s = string_with_macros conf [] s in
-            let lines = Wiki.html_of_tlsw conf s in
-            let wi =
-              {Wiki.wi_mode = "NOTES";
-               Wiki.wi_cancel_links = conf.cancel_links;
-               Wiki.wi_file_path = Notes.file_path conf base;
-               Wiki.wi_person_exists = person_exists conf base;
-               Wiki.wi_always_show_link = conf.wizard || conf.friend}
-            in
-            let s = Wiki.syntax_links conf wi (String.concat "\n" lines) in
-            Util.safe_html @@ if conf.pure_xhtml then Util.check_xhtml s else s
-          else ""
+          get_note_source conf base [] m_auth false
+            (sou base (get_marriage_src fam))
       | _ -> raise Not_found
       end
   | "max_anc_level" ->
@@ -2322,8 +2224,8 @@ and eval_simple_str_var conf base env (_, p_auth) =
             true, Some s ->
               begin match p_getenv conf.base_env "long_date" with
                 Some "yes" ->
-                  Date.string_of_ondate conf s ^ Date.get_wday conf s
-              | _ -> Date.string_of_ondate conf s
+                  DateDisplay.string_of_ondate conf s ^ DateDisplay.get_wday conf s
+              | _ -> DateDisplay.string_of_ondate conf s
               end
           | _ -> ""
           end
@@ -2334,8 +2236,8 @@ and eval_simple_str_var conf base env (_, p_auth) =
                 true, Some s ->
                   begin match p_getenv conf.base_env "long_date" with
                     Some "yes" ->
-                      Date.string_of_ondate conf s ^ Date.get_wday conf s
-                  | _ -> Date.string_of_ondate conf s
+                      DateDisplay.string_of_ondate conf s ^ DateDisplay.get_wday conf s
+                  | _ -> DateDisplay.string_of_ondate conf s
                   end
               | _ -> ""
               end
@@ -2345,7 +2247,7 @@ and eval_simple_str_var conf base env (_, p_auth) =
       begin match get_env "fam" env with
         Vfam (_, fam, _, m_auth) ->
           begin match m_auth, Adef.od_of_cdate (get_marriage fam) with
-            true, Some s -> Date.string_slash_of_date conf s
+            true, Some s -> DateDisplay.string_slash_of_date conf s
           | _ -> ""
           end
       | _ -> raise Not_found
@@ -2402,9 +2304,9 @@ and eval_simple_str_var conf base env (_, p_auth) =
       begin match get_env "desc_level_table" env with
         Vdesclevtab levt ->
           let (_, flevt) = Lazy.force levt in
-          for i = 0 to Array.length flevt - 1 do
-            flevt.(i) <- flevt_save.(i)
-          done;
+          Gwdb.Collection.iter (fun i ->
+              Gwdb.Marker.set flevt i (Gwdb.Marker.get flevt_save i)
+            ) (Gwdb.ifams base) ;
           ""
       | _ -> raise Not_found
       end
@@ -2453,12 +2355,14 @@ and eval_compound_var conf base env (a, _ as ep) loc =
   | ["base"; "name"] -> VVstring conf.bname
   | ["base"; "nb_persons"] ->
       VVstring
-        (string_of_num (Util.transl conf "(thousand separator)")
-           (Sosa.of_int (nb_of_persons base)))
+        (Mutil.string_of_int_sep
+           (Util.transl conf "(thousand separator)")
+           (nb_of_persons base))
   | ["base"; "real_nb_persons"] ->
       VVstring
-        (string_of_num (Util.transl conf "(thousand separator)")
-           (Sosa.of_int (Util.real_nb_of_persons conf base)))
+        (Mutil.string_of_int_sep
+           (Util.transl conf "(thousand separator)")
+           (Util.real_nb_of_persons conf base))
   | "birth_witness" :: sl ->
       begin match get_env "birth_witness" env with
         Vind p ->
@@ -2565,7 +2469,7 @@ and eval_compound_var conf base env (a, _ as ep) loc =
           eval_person_field_var conf base env ep loc sl
       | None ->
 #ifdef API
-          match Perso_link.get_father_link conf.command (get_key_index a) with
+          match Perso_link.get_father_link conf.command (get_iper a) with
             Some fath ->
               let ep = Perso_link.make_ep_link base fath in
               let conf = {conf with command = fath.MLink.Person.baseprefix} in
@@ -2590,7 +2494,7 @@ and eval_compound_var conf base env (a, _ as ep) loc =
           eval_person_field_var conf base env ep loc sl
       | None ->
 #ifdef API
-          match Perso_link.get_mother_link conf.command (get_key_index a) with
+          match Perso_link.get_mother_link conf.command (get_iper a) with
             Some moth ->
               let ep = Perso_link.make_ep_link base moth in
               let conf = {conf with command = moth.MLink.Person.baseprefix} in
@@ -2613,13 +2517,16 @@ and eval_compound_var conf base env (a, _ as ep) loc =
       | _ -> raise Not_found
       end
   | "number_of_descendants" :: sl ->
+      (* FIXME: what is the difference with number_of_descendants_at_level??? *)
       begin match get_env "level" env with
         Vint i ->
           begin match get_env "desc_level_table" env with
             Vdesclevtab t ->
-              let cnt =
-                Array.fold_left (fun cnt v -> if v <= i then cnt + 1 else cnt)
-                  0 (fst (Lazy.force t))
+            let m = fst (Lazy.force t) in
+            let cnt =
+              Gwdb.Collection.fold (fun cnt ip ->
+                  if Gwdb.Marker.get m ip <= i then cnt + 1 else cnt
+                ) 0 (Gwdb.ipers base)
               in
               VVstring (eval_num conf (Sosa.of_int (cnt - 1)) sl)
           | _ -> raise Not_found
@@ -2631,11 +2538,13 @@ and eval_compound_var conf base env (a, _ as ep) loc =
         Vint i ->
           begin match get_env "desc_level_table" env with
             Vdesclevtab t ->
-              let cnt =
-                Array.fold_left (fun cnt v -> if v = i then cnt + 1 else cnt)
-                  0 (fst (Lazy.force t))
+            let m = fst (Lazy.force t) in
+            let cnt =
+              Gwdb.Collection.fold (fun cnt ip ->
+                  if Gwdb.Marker.get m ip <= i then cnt + 1 else cnt
+                ) 0 (Gwdb.ipers base)
               in
-              VVstring (eval_num conf (Sosa.of_int cnt) sl)
+              VVstring (eval_num conf (Sosa.of_int (cnt - 1)) sl)
           | _ -> raise Not_found
           end
       | _ -> raise Not_found
@@ -2661,7 +2570,7 @@ and eval_compound_var conf base env (a, _ as ep) loc =
   | "pvar" :: v :: sl ->
       begin match find_person_in_env conf base v with
       | Some p ->
-          let ep = make_ep conf base (get_key_index p) in
+          let ep = make_ep conf base (get_iper p) in
           eval_person_field_var conf base env ep loc sl
       | None -> raise Not_found
       end
@@ -2669,12 +2578,12 @@ and eval_compound_var conf base env (a, _ as ep) loc =
       (* %qvar.index_v.surname;
          direct access to a person whose index value is v
       *)
-      let v0 = int_of_string v in
-      if v0 >= 0 && v0 < nb_of_persons base then
-        let ep = make_ep conf base (Adef.iper_of_int v0) in
+      let v0 = iper_of_string v in
+      (* if v0 >= 0 && v0 < nb_of_persons base then *)
+        let ep = make_ep conf base v0 in
         if is_hidden (fst ep) then raise Not_found
         else eval_person_field_var conf base env ep loc sl
-      else raise Not_found
+      (* else raise Not_found *)
   | "svar" :: i :: sl ->
       (* http://localhost:2317/HenriT_w?m=DAG&p1=henri&n1=duchmol&s1=243&s2=245
          access to sosa si=n of a person pi ni
@@ -2694,10 +2603,9 @@ and eval_compound_var conf base env (a, _ as ep) loc =
       begin match p_getint conf.env ("s" ^ i) with
       | Some s ->
             let s0 = Sosa.of_int s in
-            let ip0 = get_key_index p0 in
-            begin match Util.branch_of_sosa conf base ip0 s0 with
-            | Some ((ip, _) :: _) ->
-                let p = poi base ip in
+            let ip0 = get_iper p0 in
+            begin match Util.branch_of_sosa conf base s0 (pget conf base ip0) with
+            | Some (p :: _) ->
                 let p_auth = authorized_age conf base p in
                 eval_person_field_var conf base env (p, p_auth) loc sl
             | _ -> raise Not_found
@@ -2712,11 +2620,10 @@ and eval_compound_var conf base env (a, _ as ep) loc =
       | Vsosa_ref v ->
           begin match Lazy.force v with
           | Some p ->
-              let ip = get_key_index p in
+              let ip = get_iper p in
               let s0 = Sosa.of_string s in
-              begin match Util.branch_of_sosa conf base ip s0 with
-              | Some ((ip, _) :: _) ->
-                  let p = poi base ip in
+              begin match Util.branch_of_sosa conf base s0 (pget conf base ip) with
+              | Some (p :: _) ->
                   let p_auth = authorized_age conf base p in
                   eval_person_field_var conf base env (p, p_auth) loc sl
               | _ -> raise Not_found
@@ -2729,7 +2636,7 @@ and eval_compound_var conf base env (a, _ as ep) loc =
       (* %sosa_anc_p.sosa.first_name;
          direct access to a person whose sosa relative to current person
       *)
-      begin match get_p_of_sosa conf base (Sosa.of_string s) a with
+      begin match Util.p_of_sosa conf base (Sosa.of_string s) a with
       | Some np ->
         let np_auth = authorized_age conf base np in
         eval_person_field_var conf base env (np, np_auth) loc sl
@@ -2739,7 +2646,7 @@ and eval_compound_var conf base env (a, _ as ep) loc =
       begin match get_env "rel" env with
         Vrel ({r_type = rt}, Some p) ->
           eval_relation_field_var conf base env
-            (index_of_sex (get_sex p), rt, get_key_index p, false) loc sl
+            (index_of_sex (get_sex p), rt, get_iper p, false) loc sl
       | _ -> raise Not_found
       end
   | "relation_her" :: sl ->
@@ -2760,7 +2667,7 @@ and eval_compound_var conf base env (a, _ as ep) loc =
         Vsosa_ref v ->
           begin match Lazy.force v with
             Some p ->
-              let ep = make_ep conf base (get_key_index p) in
+              let ep = make_ep conf base (get_iper p) in
               eval_person_field_var conf base env ep loc sl
           | None -> raise Not_found
           end
@@ -2840,7 +2747,7 @@ and eval_cell_field_var conf base env cell loc =
       begin match cell with
         Cell (p, Some ifam, _, _, _, base_prefix) ->
           if conf.bname = base_prefix then
-            let (f, c, a) = make_efam conf base (get_key_index p) ifam in
+            let (f, c, a) = make_efam conf base (get_iper p) ifam in
             eval_family_field_var conf base env (ifam, f, c, a) loc sl
           else
 #ifdef API
@@ -2850,32 +2757,22 @@ and eval_cell_field_var conf base env cell loc =
                 match l with
                   [] -> failwith "lia"
                 | fam_link :: l ->
-                    let fam_link_ifam =
-                      Adef.ifam_of_int
-                        (Int32.to_int fam_link.MLink.Family.ifam)
-                    in
+                    let fam_link_ifam = Gwdb.ifam_of_string @@ Int32.to_string fam_link.MLink.Family.ifam in
                     if fam_link_ifam = ifam then
                       let (_, fam, _, _) =
                         Perso_link.make_efam_link conf base fam_link
                       in
-                      let (ifath, imoth) =
-                        Adef.iper_of_int
-                          (Int32.to_int fam_link.MLink.Family.ifath),
-                        Adef.iper_of_int
-                          (Int32.to_int fam_link.MLink.Family.imoth)
-                      in
+                      let ifath = Gwdb.iper_of_string @@ Int32.to_string fam_link.MLink.Family.ifath in
+                      let imoth = Gwdb.iper_of_string @@ Int32.to_string fam_link.MLink.Family.imoth in
                       let cpl =
-                        let ip = get_key_index p in
+                        let ip = get_iper p in
                         if ip <> ifath && ip <> imoth then
                           match
                             Perso_link.get_person_link_with_base conf.command
                               ip base_prefix
                           with
                             Some p ->
-                              let ip =
-                                Adef.iper_of_int
-                                  (Int32.to_int p.MLink.Person.ip)
-                              in
+                              let ip = Gwdb.iper_of_string @@ Int32.to_string p.MLink.Person.ip in
                               ifath, imoth,
                               (if ip = ifath then imoth else ifath)
                           | None ->
@@ -2888,7 +2785,7 @@ and eval_cell_field_var conf base env cell loc =
                     else loop l
               in
               let faml =
-                Perso_link.get_family_link conf.command (get_key_index p)
+                Perso_link.get_family_link conf.command (get_iper p)
               in
               loop faml
             in
@@ -2927,7 +2824,7 @@ and eval_cell_field_var conf base env cell loc =
       begin match cell with
         Cell (p, _, _, _, _, base_prefix) ->
           if conf.bname = base_prefix then
-            let ep = make_ep conf base (get_key_index p) in
+            let ep = make_ep conf base (get_iper p) in
             eval_person_field_var conf base env ep loc sl
           else
             let conf = {conf with command = base_prefix} in
@@ -2986,25 +2883,19 @@ and eval_ancestor_field_var conf base env gp loc =
       | _ -> VVstring ""
       end
   | ["interval"] ->
+    let to_string x =
+      Mutil.string_of_int_sep
+        (transl conf "(thousand separator)")
+        (int_of_string @@ Sosa.to_string x)
+    in
       begin match gp with
         GP_interv (Some (n1, n2, Some (n3, n4))) ->
           let n2 = Sosa.sub n2 Sosa.one in
           let n4 = Sosa.sub n4 Sosa.one in
-          let sep = transl conf "(thousand separator)" in
-          let r =
-            Sosa.to_string_sep sep n1 ^ "-" ^ Sosa.to_string_sep sep n2 ^
-            " = " ^ Sosa.to_string_sep sep n3 ^ "-" ^
-            Sosa.to_string_sep sep n4
-          in
-          VVstring r
+          VVstring (to_string n1 ^ "-" ^ to_string n2 ^ " = " ^ to_string n3 ^ "-" ^ to_string n4)
       | GP_interv (Some (n1, n2, None)) ->
           let n2 = Sosa.sub n2 Sosa.one in
-          let sep = transl conf "(thousand separator)" in
-          let r =
-            Sosa.to_string_sep sep n1 ^ "-" ^ Sosa.to_string_sep sep n2 ^
-            " = ..."
-          in
-          VVstring r
+          VVstring (to_string n1 ^ "-" ^ to_string n2 ^ " = ...")
       | GP_interv None -> VVstring "..."
       | _ -> VVstring ""
       end
@@ -3068,7 +2959,7 @@ and eval_anc_by_surnl_field_var conf base env ep info =
            in
            let (p, _) = ep in VVstring (acces_n conf base "1" p ^ str)
        | sl ->
-           let ep = make_ep conf base (get_key_index p) in
+           let ep = make_ep conf base (get_iper p) in
            eval_person_field_var conf base env ep loc sl)
   | Eclair (_, place, db, de, p, persl, loc) ->
       function
@@ -3090,13 +2981,13 @@ and eval_anc_by_surnl_field_var conf base env ep info =
           VVstring (string_of_int (List.length list))
       | ["place"] -> VVstring place
       | sl ->
-          let ep = make_ep conf base (get_key_index p) in
+          let ep = make_ep conf base (get_iper p) in
           eval_person_field_var conf base env ep loc sl
 and eval_num conf n =
   function
-    ["hexa"] -> "0x" ^ Sosa.to_string_sep_base "" 16 n
-  | ["octal"] -> "0o" ^ Sosa.to_string_sep_base "" 8 n
-  | ["lvl"] -> string_of_int (String.length (Sosa.to_string_sep_base "" 2 n))
+    ["hexa"] -> Printf.sprintf "0x%X" @@ int_of_string (Sosa.to_string n)
+  | ["octal"] -> Printf.sprintf "0x%o" @@ int_of_string (Sosa.to_string n)
+  | ["lvl"] -> string_of_int @@ Sosa.gen n
   | ["v"] -> Sosa.to_string n
   | [] -> Sosa.to_string_sep (transl conf "(thousand separator)") n
   | _ -> raise Not_found
@@ -3149,7 +3040,7 @@ and eval_person_field_var conf base env (p, p_auth as ep) loc =
           eval_person_field_var conf base env ep loc sl
       | None ->
 #ifdef API
-          match Perso_link.get_father_link conf.command (get_key_index p) with
+          match Perso_link.get_father_link conf.command (get_iper p) with
             Some fath ->
               let ep = Perso_link.make_ep_link base fath in
               let conf = {conf with command = fath.MLink.Person.baseprefix} in
@@ -3215,7 +3106,7 @@ and eval_person_field_var conf base env (p, p_auth as ep) loc =
         let from_gen_desc = int_of_string from_gen_desc in
         let nb_desc = int_of_string nb_desc in
         let () =
-          Perso_link.init_cache conf base (get_key_index p) nb_asc
+          Perso_link.init_cache conf base (get_iper p) nb_asc
             from_gen_desc nb_desc
         in
         VVstring ""
@@ -3254,7 +3145,7 @@ and eval_person_field_var conf base env (p, p_auth as ep) loc =
           eval_person_field_var conf base env ep loc sl
       | None ->
 #ifdef API
-          match Perso_link.get_mother_link conf.command (get_key_index p) with
+          match Perso_link.get_mother_link conf.command (get_iper p) with
             Some moth ->
               let ep = Perso_link.make_ep_link base moth in
               let conf = {conf with command = moth.MLink.Person.baseprefix} in
@@ -3322,7 +3213,7 @@ and eval_person_field_var conf base env (p, p_auth as ep) loc =
       begin match get_env "fam" env with
         Vfam (ifam, _, _, _) ->
           let cpl = foi base ifam in
-          let ip = Gutil.spouse (get_key_index p) cpl in
+          let ip = Gutil.spouse (get_iper p) cpl in
           let ep = make_ep conf base ip in
           eval_person_field_var conf base env ep loc sl
       | _ -> raise Not_found
@@ -3341,7 +3232,7 @@ and eval_date_field_var conf d =
   function
     ["prec"] ->
       begin match d with
-        Dgreg (dmy, _) -> VVstring (Util.escape_html (Date.prec_text conf dmy))
+        Dgreg (dmy, _) -> VVstring (Util.escape_html (DateDisplay.prec_text conf dmy))
       | _ -> VVstring ""
       end
   | ["day"] ->
@@ -3370,7 +3261,7 @@ and eval_date_field_var conf d =
       end
   | ["month"] ->
       begin match d with
-        Dgreg (dmy, _) -> VVstring (Date.month_text dmy)
+        Dgreg (dmy, _) -> VVstring (DateDisplay.month_text dmy)
       | _ -> VVstring ""
       end
   | ["month2"] ->
@@ -3398,7 +3289,7 @@ and eval_date_field_var conf d =
           end
       | _ -> VVstring ""
       end
-  | [] -> VVstring (Date.string_of_date_sep conf "&#010;  " d)
+  | [] -> VVstring (DateDisplay.string_of_date_sep conf "&#010;  " d)
   | _ -> raise Not_found
 and _eval_place_field_var conf place =
   function
@@ -3487,12 +3378,12 @@ and eval_str_event_field conf base (p, p_auth)
           Some (Dgreg (({prec = Sure | About | Maybe} as d1), _)),
           Some (Dgreg (({prec = Sure | About | Maybe} as d2), _))
           when d1 <> d2 ->
-            let a = CheckItem.time_elapsed d1 d2 in
+            let a = Date.time_elapsed d1 d2 in
             let s =
               if not approx && d1.prec = Sure && d2.prec = Sure then ""
               else transl_decline conf "possibly (date)" "" ^ " "
             in
-            s ^ Date.string_of_age conf a
+            s ^ DateDisplay.string_of_age conf a
         | _ -> ""
       else ""
   | "name" ->
@@ -3503,49 +3394,26 @@ and eval_str_event_field conf base (p, p_auth)
       end
   | "date" ->
       begin match p_auth, Adef.od_of_cdate date with
-        true, Some d -> Date.string_of_date conf d
+        true, Some d -> DateDisplay.string_of_date conf d
       | _ -> ""
       end
   | "on_date" ->
       begin match p_auth, Adef.od_of_cdate date with
         true, Some d ->
           begin match p_getenv conf.base_env "long_date" with
-            Some "yes" -> Date.string_of_ondate conf d ^ Date.get_wday conf d
-          | _ -> Date.string_of_ondate conf d
+            Some "yes" -> DateDisplay.string_of_ondate conf d ^ DateDisplay.get_wday conf d
+          | _ -> DateDisplay.string_of_ondate conf d
           end
       | _ -> ""
       end
   | "place" ->
       if p_auth then Util.string_of_place conf (sou base place) else ""
   | "note" ->
-      if p_auth && not conf.no_note then
-        let env = ['i', (fun () -> Util.default_image_name base p)] in
-        let s = sou base note in
-        let s = string_with_macros conf env s in
-        let lines = Wiki.html_of_tlsw conf s in
-        let wi =
-          {Wiki.wi_mode = "NOTES"; Wiki.wi_cancel_links = conf.cancel_links;
-           Wiki.wi_file_path = Notes.file_path conf base;
-           Wiki.wi_person_exists = person_exists conf base;
-           Wiki.wi_always_show_link = conf.wizard || conf.friend}
-        in
-        let s = Wiki.syntax_links conf wi (String.concat "\n" lines) in
-        Util.safe_html @@ if conf.pure_xhtml then Util.check_xhtml s else s
-      else ""
+      let env = ['i', (fun () -> Util.default_image_name base p)] in
+      get_note_source conf base env p_auth conf.no_note (sou base note)
   | "src" ->
-      if p_auth then
-        let env = ['i', (fun () -> Util.default_image_name base p)] in
-        let src =
-          let wi =
-            {Wiki.wi_mode = "NOTES"; Wiki.wi_cancel_links = conf.cancel_links;
-             Wiki.wi_file_path = Notes.file_path conf base;
-             Wiki.wi_person_exists = person_exists conf base;
-             Wiki.wi_always_show_link = conf.wizard || conf.friend}
-          in
-          Wiki.syntax_links conf wi (sou base src)
-        in
-        Util.safe_html @@ string_with_macros conf env src
-      else ""
+      let env = ['i', (fun () -> Util.default_image_name base p)] in
+      get_note_source conf base env p_auth false (sou base src)
   | _ -> raise Not_found
 and eval_event_field_var conf base env (p, p_auth)
     (name, date, place, note, src, w, isp) loc =
@@ -3594,7 +3462,7 @@ and eval_bool_person_field conf base env (p, p_auth) =
           if d.prec = Sure && get_death p = NotDead then
             d.day = conf.today.day && d.month = conf.today.month &&
             d.year < conf.today.year ||
-            not (CheckItem.leap_year conf.today.year) && d.day = 29 &&
+            not (Date.leap_year conf.today.year) && d.day = 29 &&
             d.month = 2 && conf.today.day = 1 && conf.today.month = 3
           else false
       | _ -> false
@@ -3615,7 +3483,7 @@ and eval_bool_person_field conf base env (p, p_auth) =
                   then
                     d.day = conf.today.day && d.month = conf.today.month &&
                     d.year < conf.today.year ||
-                    not (CheckItem.leap_year conf.today.year) && d.day = 29 &&
+                    not (Date.leap_year conf.today.year) && d.day = 29 &&
                     d.month = 2 && conf.today.day = 1 && conf.today.month = 3
                   else false
               | _ -> false
@@ -3638,7 +3506,7 @@ and eval_bool_person_field conf base env (p, p_auth) =
           Some (Dgreg (({prec = Sure | About | Maybe} as d2), _)),
           _
           when d1 <> d2 ->
-            let a = CheckItem.time_elapsed d1 d2 in
+            let a = Date.time_elapsed d1 d2 in
             a.year > 0 ||
             a.year = 0 && (a.month > 0 || a.month = 0 && a.day > 0)
         | _ -> false
@@ -3653,7 +3521,7 @@ and eval_bool_person_field conf base env (p, p_auth) =
             with
               Some (Dgreg (({prec = Sure | About | Maybe} as d1), _)),
               Some (Dgreg (({prec = Sure | About | Maybe} as d2), _)) ->
-                let a = CheckItem.time_elapsed d1 d2 in
+                let a = Date.time_elapsed d1 d2 in
                 a.year > 0 ||
                 a.year = 0 && (a.month > 0 || a.month = 0 && a.day > 0)
             | _ -> false
@@ -3731,47 +3599,40 @@ and eval_bool_person_field conf base env (p, p_auth) =
           else
 #ifdef API
             let faml =
-              Perso_link.get_family_link conf.command (get_key_index p)
+              Perso_link.get_family_link conf.command (get_iper p)
             in
             let rec loop faml =
               match faml with
                 [] -> false
               | fam_link :: faml ->
                   let (ifath, imoth, _) =
-                    Adef.iper_of_int
-                      (Int32.to_int fam_link.MLink.Family.ifath),
-                    Adef.iper_of_int
-                      (Int32.to_int fam_link.MLink.Family.imoth),
-                    Adef.ifam_of_int (Int32.to_int fam_link.MLink.Family.ifam)
+                    Gwdb.iper_of_string @@ Int32.to_string fam_link.MLink.Family.ifath,
+                    Gwdb.iper_of_string @@ Int32.to_string fam_link.MLink.Family.imoth,
+                    Gwdb.iper_of_string @@ Int32.to_string fam_link.MLink.Family.ifam
                   in
                   let cpl =
-                    let ip = get_key_index p in
+                    let ip = get_iper p in
                     if ip <> ifath && ip <> imoth then
                       match
                         Perso_link.get_person_link_with_base conf.command ip
                           fam_link.MLink.Family.baseprefix
                       with
                         Some p ->
-                          let ip =
-                            Adef.iper_of_int (Int32.to_int p.MLink.Person.ip)
-                          in
+                          let ip = Gwdb.iper_of_string @@ Int32.to_string p.MLink.Person.ip in
                           ifath, imoth, (if ip = ifath then imoth else ifath)
                       | None ->
                           ifath, imoth, (if ip = ifath then imoth else ifath)
                     else ifath, imoth, (if ip = ifath then imoth else ifath)
                   in
                   let can_merge =
-                    Perso_link.can_merge_family conf.command (get_key_index p)
+                    Perso_link.can_merge_family conf.command (get_iper p)
                       [fam] fam_link cpl
                   in
                   if can_merge then
                     let (ifam, ifath, imoth) =
-                      Adef.ifam_of_int
-                        (Int32.to_int fam_link.MLink.Family.ifam),
-                      Adef.iper_of_int
-                        (Int32.to_int fam_link.MLink.Family.ifath),
-                      Adef.iper_of_int
-                        (Int32.to_int fam_link.MLink.Family.imoth)
+                      Gwdb.ifam_of_string @@ Int32.to_string fam_link.MLink.Family.ifam,
+                      Gwdb.iper_of_string @@ Int32.to_string fam_link.MLink.Family.ifath,
+                      Gwdb.iper_of_string @@ Int32.to_string fam_link.MLink.Family.imoth
                     in
                     List.length
                       (Perso_link.get_children_of_parents
@@ -3785,11 +3646,11 @@ and eval_bool_person_field conf base env (p, p_auth) =
 #endif
       | _ ->
           let b =
-            List.exists
+            Array.exists
               (fun ifam ->
                  let des = foi base ifam in
                  Array.length (get_children des) > 0)
-              (Array.to_list (get_family p))
+              (get_family p)
           in
           if b then b
           else
@@ -3919,7 +3780,7 @@ and eval_bool_person_field conf base env (p, p_auth) =
       ||
       List.length
         (Perso_link.get_family_correspondance conf.command
-           (get_key_index p)) >
+           (get_iper p)) >
         0
 #endif
   | "has_first_names_aliases" ->
@@ -3941,7 +3802,7 @@ and eval_bool_person_field conf base env (p, p_auth) =
            Vstring baseprefix -> {conf with command = baseprefix}
          | _ -> conf
        in
-       Perso_link.get_parents_link conf.command (get_key_index p) <> None)
+       Perso_link.get_parents_link conf.command (get_iper p) <> None)
 #endif
   | "has_possible_duplications" -> has_possible_duplications conf base p
   | "has_psources" ->
@@ -3975,7 +3836,7 @@ and eval_bool_person_field conf base env (p, p_auth) =
             | _ -> conf
           in
           match
-            Perso_link.get_parents_link conf.command (get_key_index p)
+            Perso_link.get_parents_link conf.command (get_iper p)
           with
             Some family -> List.length family.MLink.Family.children > 1
           | None -> false
@@ -3989,17 +3850,17 @@ and eval_bool_person_field conf base env (p, p_auth) =
        sou base (get_baptism_src p) <> "" ||
        sou base (get_death_src p) <> "" ||
        sou base (get_burial_src p) <> "" ||
-       List.exists
+       Array.exists
          (fun ifam ->
             let fam = foi base ifam in
-            let isp = Gutil.spouse (get_key_index p) fam in
+            let isp = Gutil.spouse (get_iper p) fam in
             let sp = poi base isp in
             (* On sait que p_auth vaut vrai. *)
             let m_auth = authorized_age conf base sp in
             m_auth &&
             (sou base (get_marriage_src fam) <> "" ||
              sou base (get_fsources fam) <> ""))
-         (Array.to_list (get_family p)))
+         (get_family p))
   | "has_surnames_aliases" ->
       if not p_auth && is_hide_names conf p then false
       else get_surnames_aliases p <> []
@@ -4025,7 +3886,7 @@ and eval_bool_person_field conf base env (p, p_auth) =
       end
   | "is_descendant" ->
       begin match get_env "desc_mark" env with
-        Vdmark r -> !r.(Adef.int_of_iper (get_key_index p))
+        Vdmark r -> (Gwdb.Marker.get !r (get_iper p))
       | _ -> raise Not_found
       end
   | "is_female" -> get_sex p = Female
@@ -4043,8 +3904,8 @@ and eval_str_person_field conf base env (p, p_auth as ep) =
   | "age" ->
       begin match p_auth, Adef.od_of_cdate (get_birth p), get_death p with
         true, Some (Dgreg (d, _)), NotDead ->
-          let a = CheckItem.time_elapsed d conf.today in
-          Date.string_of_age conf a
+          let a = Date.time_elapsed d conf.today in
+          DateDisplay.string_of_age conf a
       | _ -> ""
       end
   | "alias" ->
@@ -4077,57 +3938,36 @@ and eval_str_person_field conf base env (p, p_auth as ep) =
       if p_auth then Util.string_of_place conf (sou base (get_birth_place p))
       else ""
   | "birth_note" ->
-      if p_auth && not conf.no_note then
-        let env = ['i', (fun () -> Util.default_image_name base p)] in
-        let s = sou base (get_birth_note p) in
-        let s = string_with_macros conf env s in
-        let lines = Wiki.html_of_tlsw conf s in
-        let wi =
-          {Wiki.wi_mode = "NOTES"; Wiki.wi_cancel_links = conf.cancel_links;
-           Wiki.wi_file_path = Notes.file_path conf base;
-           Wiki.wi_person_exists = person_exists conf base;
-           Wiki.wi_always_show_link = conf.wizard || conf.friend}
-        in
-        let s = Wiki.syntax_links conf wi (String.concat "\n" lines) in
-        Util.safe_html @@ if conf.pure_xhtml then Util.check_xhtml s else s
-      else ""
+      let env = ['i', (fun () -> Util.default_image_name base p)] in
+      get_note_source conf base env p_auth conf.no_note
+        (sou base (get_birth_note p))
+  | "birth_source" ->
+      let env = ['i', (fun () -> Util.default_image_name base p)] in
+      get_note_source conf base env p_auth false
+        (sou base (get_birth_src p))
   | "baptism_place" ->
       if p_auth then
         Util.string_of_place conf (sou base (get_baptism_place p))
       else ""
   | "baptism_note" ->
-      if p_auth && not conf.no_note then
-        let env = ['i', (fun () -> Util.default_image_name base p)] in
-        let s = sou base (get_baptism_note p) in
-        let s = string_with_macros conf env s in
-        let lines = Wiki.html_of_tlsw conf s in
-        let wi =
-          {Wiki.wi_mode = "NOTES"; Wiki.wi_cancel_links = conf.cancel_links;
-           Wiki.wi_file_path = Notes.file_path conf base;
-           Wiki.wi_person_exists = person_exists conf base;
-           Wiki.wi_always_show_link = conf.wizard || conf.friend}
-        in
-        let s = Wiki.syntax_links conf wi (String.concat "\n" lines) in
-        Util.safe_html @@ if conf.pure_xhtml then Util.check_xhtml s else s
-      else ""
+      let env = ['i', (fun () -> Util.default_image_name base p)] in
+      get_note_source conf base env p_auth conf.no_note
+        (sou base (get_baptism_note p))
+  | "baptism_source" ->
+      let env = ['i', (fun () -> Util.default_image_name base p)] in
+      get_note_source conf base env p_auth false
+        (sou base (get_baptism_src p))
   | "burial_place" ->
       if p_auth then Util.string_of_place conf (sou base (get_burial_place p))
       else ""
   | "burial_note" ->
-      if p_auth && not conf.no_note then
-        let env = ['i', (fun () -> Util.default_image_name base p)] in
-        let s = sou base (get_burial_note p) in
-        let s = string_with_macros conf env s in
-        let lines = Wiki.html_of_tlsw conf s in
-        let wi =
-          {Wiki.wi_mode = "NOTES"; Wiki.wi_cancel_links = conf.cancel_links;
-           Wiki.wi_file_path = Notes.file_path conf base;
-           Wiki.wi_person_exists = person_exists conf base;
-           Wiki.wi_always_show_link = conf.wizard || conf.friend}
-        in
-        let s = Wiki.syntax_links conf wi (String.concat "\n" lines) in
-        Util.safe_html @@ if conf.pure_xhtml then Util.check_xhtml s else s
-      else ""
+      let env = ['i', (fun () -> Util.default_image_name base p)] in
+      get_note_source conf base env p_auth conf.no_note
+        (sou base (get_burial_note p))
+  | "burial_source" ->
+      let env = ['i', (fun () -> Util.default_image_name base p)] in
+      get_note_source conf base env p_auth false
+        (sou base (get_burial_src p))
   | "child_name" ->
       let force_surname =
         match get_parents p with
@@ -4148,46 +3988,39 @@ and eval_str_person_field conf base env (p, p_auth as ep) =
   | "cremation_place" ->
       if p_auth then Util.string_of_place conf (sou base (get_burial_place p))
       else ""
-  | "dates" -> if p_auth then Date.short_dates_text conf base p else ""
+  | "dates" -> if p_auth then DateDisplay.short_dates_text conf base p else ""
   | "death_age" ->
       if p_auth then
         match Date.get_birth_death_date p with
           Some (Dgreg (({prec = Sure | About | Maybe} as d1), _)),
           Some (Dgreg (({prec = Sure | About | Maybe} as d2), _)), approx
           when d1 <> d2 ->
-            let a = CheckItem.time_elapsed d1 d2 in
+            let a = Date.time_elapsed d1 d2 in
             let s =
               if not approx && d1.prec = Sure && d2.prec = Sure then ""
               else transl_decline conf "possibly (date)" "" ^ " "
             in
-            s ^ Date.string_of_age conf a
+            s ^ DateDisplay.string_of_age conf a
         | _ -> ""
       else ""
   | "death_place" ->
       if p_auth then Util.string_of_place conf (sou base (get_death_place p))
       else ""
   | "death_note" ->
-      if p_auth && not conf.no_note then
-        let env = ['i', (fun () -> Util.default_image_name base p)] in
-        let s = sou base (get_death_note p) in
-        let s = string_with_macros conf env s in
-        let lines = Wiki.html_of_tlsw conf s in
-        let wi =
-          {Wiki.wi_mode = "NOTES"; Wiki.wi_cancel_links = conf.cancel_links;
-           Wiki.wi_file_path = Notes.file_path conf base;
-           Wiki.wi_person_exists = person_exists conf base;
-           Wiki.wi_always_show_link = conf.wizard || conf.friend}
-        in
-        let s = Wiki.syntax_links conf wi (String.concat "\n" lines) in
-        Util.safe_html @@ if conf.pure_xhtml then Util.check_xhtml s else s
-      else ""
+      let env = ['i', (fun () -> Util.default_image_name base p)] in
+      get_note_source conf base env p_auth conf.no_note
+        (sou base (get_death_note p))
+  | "death_source" ->
+      let env = ['i', (fun () -> Util.default_image_name base p)] in
+      get_note_source conf base env p_auth false
+        (sou base (get_death_src p))
   | "died" -> string_of_died conf p p_auth
   | "fam_access" ->
       (* deprecated since 5.00: rather use "i=%family.index;&ip=%index;" *)
       begin match get_env "fam" env with
         Vfam (ifam, _, _, _) ->
-          Printf.sprintf "i=%d&ip=%d" (Adef.int_of_ifam ifam)
-            (Adef.int_of_iper (get_key_index p))
+          Printf.sprintf "i=%s&ip=%s" (string_of_ifam ifam)
+            (string_of_iper (get_iper p))
       | _ -> raise Not_found
       end
   | "father_age_at_birth" -> string_of_parent_age conf base ep get_father
@@ -4216,22 +4049,22 @@ and eval_str_person_field conf base env (p, p_auth as ep) =
   | "image_url" -> string_of_image_url conf base ep false
   | "ind_access" ->
       (* deprecated since 5.00: rather use "i=%index;" *)
-      "i=" ^ string_of_int (Adef.int_of_iper (get_key_index p))
+      "i=" ^ string_of_iper (get_iper p)
   | "index" ->
       begin match get_env "p_link" env with
         Vbool _ -> ""
-      | _ -> string_of_int (Adef.int_of_iper (get_key_index p))
+      | _ -> string_of_iper (get_iper p)
       end
   | "mark_descendants" ->
       begin match get_env "desc_mark" env with
         Vdmark r ->
-          let tab = Array.make (nb_of_persons base) false in
+          let tab = Gwdb.iper_marker (Gwdb.ipers base) false in
           let rec mark_descendants len p =
-            let i = Adef.int_of_iper (get_key_index p) in
-            if tab.(i) then ()
+            let i = (get_iper p) in
+            if Gwdb.Marker.get tab i then ()
             else
               begin
-                tab.(i) <- true;
+                Gwdb.Marker.set tab i true;
                 let u = p in
                 for i = 0 to Array.length (get_family u) - 1 do
                   let des = foi base (get_family u).(i) in
@@ -4255,8 +4088,8 @@ and eval_str_person_field conf base env (p, p_auth as ep) =
             with
               Some (Dgreg (({prec = Sure | About | Maybe} as d1), _)),
               Some (Dgreg (({prec = Sure | About | Maybe} as d2), _)) ->
-                let a = CheckItem.time_elapsed d1 d2 in
-                Date.string_of_age conf a
+                let a = Date.time_elapsed d1 d2 in
+                DateDisplay.string_of_age conf a
             | _ -> ""
           else ""
       | _ -> raise Not_found
@@ -4280,9 +4113,9 @@ and eval_str_person_field conf base env (p, p_auth as ep) =
       else ""
   | "nb_children_total" ->
       let n =
-        List.fold_left
+        Array.fold_left
           (fun n ifam -> n + Array.length (get_children (foi base ifam))) 0
-          (Array.to_list (get_family p))
+          (get_family p)
       in
       string_of_int n
   | "nb_children" ->
@@ -4309,18 +4142,18 @@ and eval_str_person_field conf base env (p, p_auth as ep) =
               string_of_int (List.length children)
           | _ ->
               let n =
-                List.fold_left
+                Array.fold_left
                   (fun n ifam ->
                      n + Array.length (get_children (foi base ifam)))
-                  0 (Array.to_list (get_family p))
+                  0 (get_family p)
               in
               string_of_int n
 #else
           let n =
-            List.fold_left
+            Array.fold_left
               (fun n ifam ->
                  n + Array.length (get_children (foi base ifam)))
-              0 (Array.to_list (get_family p))
+              0 (get_family p)
           in
           string_of_int n
 #endif
@@ -4332,77 +4165,56 @@ and eval_str_person_field conf base env (p, p_auth as ep) =
           string_of_int
             (List.length
                (Perso_link.get_family_correspondance conf.command
-                  (get_key_index p)))
+                  (get_iper p)))
 #else
       "0"
 #endif
       | _ -> string_of_int (Array.length (get_family p))
       end
   | "notes" | "pnotes" ->
-      if p_auth && not conf.no_note then
-        let env = ['i', (fun () -> Util.default_image_name base p)] in
-        let s = sou base (get_notes p) in
-        let s = string_with_macros conf env s in
-        let lines = Wiki.html_of_tlsw conf s in
-        let wi =
-          {Wiki.wi_mode = "NOTES"; Wiki.wi_cancel_links = conf.cancel_links;
-           Wiki.wi_file_path = Notes.file_path conf base;
-           Wiki.wi_person_exists = person_exists conf base;
-           Wiki.wi_always_show_link = conf.wizard || conf.friend}
-        in
-        let s = Wiki.syntax_links conf wi (String.concat "\n" lines) in
-        Util.safe_html @@ if conf.pure_xhtml then Util.check_xhtml s else s
-      else ""
+      let env = ['i', (fun () -> Util.default_image_name base p)] in
+      get_note_source conf base env p_auth conf.no_note
+        (sou base (get_notes p))
   | "occ" ->
       if is_hide_names conf p && not p_auth then ""
       else string_of_int (get_occ p)
   | "occupation" ->
-      if p_auth then
-        let s = sou base (get_occupation p) in
-        let s =
-          let wi =
-            {Wiki.wi_mode = "NOTES"; Wiki.wi_cancel_links = conf.cancel_links;
-             Wiki.wi_file_path = Notes.file_path conf base;
-             Wiki.wi_person_exists = person_exists conf base;
-             Wiki.wi_always_show_link = conf.wizard || conf.friend}
-          in
-          Wiki.syntax_links conf wi s
-        in
-        Util.safe_html @@ string_with_macros conf [] s
-      else ""
+      let env = ['i', (fun () -> Util.default_image_name base p)] in
+      get_note_source conf base env p_auth false
+        (sou base (get_occupation p))
   | "on_baptism_date" ->
       begin match p_auth, Adef.od_of_cdate (get_baptism p) with
         true, Some d ->
           begin match p_getenv conf.base_env "long_date" with
-            Some "yes" -> Date.string_of_ondate conf d ^ Date.get_wday conf d
-          | _ -> Date.string_of_ondate conf d
+            Some "yes" -> DateDisplay.string_of_ondate conf d ^ DateDisplay.get_wday conf d
+          | _ -> DateDisplay.string_of_ondate conf d
           end
       | _ -> ""
       end
   | "slash_baptism_date" ->
       begin match p_auth, Adef.od_of_cdate (get_baptism p) with
-        true, Some d -> Date.string_slash_of_date conf d
+        true, Some d -> DateDisplay.string_slash_of_date conf d
       | _ -> ""
       end
   | "on_birth_date" ->
       begin match p_auth, Adef.od_of_cdate (get_birth p) with
         true, Some d ->
           begin match p_getenv conf.base_env "long_date" with
-            Some "yes" -> Date.string_of_ondate conf d ^ Date.get_wday conf d
-          | _ -> Date.string_of_ondate conf d
+            Some "yes" -> DateDisplay.string_of_ondate conf d ^ DateDisplay.get_wday conf d
+          | _ -> DateDisplay.string_of_ondate conf d
           end
       | _ -> ""
       end
   | "slash_birth_date" ->
       begin match p_auth, Adef.od_of_cdate (get_birth p) with
-        true, Some d -> Date.string_slash_of_date conf d
+        true, Some d -> DateDisplay.string_slash_of_date conf d
       | _ -> ""
       end
   | "slash_approx_birth_date" ->
       begin match
         p_auth, fst (Util.get_approx_birth_date_place conf base p)
       with
-        true, Some d -> Date.string_slash_of_date conf d
+        true, Some d -> DateDisplay.string_slash_of_date conf d
       | _ -> ""
       end
   | "on_burial_date" ->
@@ -4412,33 +4224,22 @@ and eval_str_person_field conf base env (p, p_auth as ep) =
             true, Some d ->
               begin match p_getenv conf.base_env "long_date" with
                 Some "yes" ->
-                  Date.string_of_ondate conf d ^ Date.get_wday conf d
-              | _ -> Date.string_of_ondate conf d
+                  DateDisplay.string_of_ondate conf d ^ DateDisplay.get_wday conf d
+              | _ -> DateDisplay.string_of_ondate conf d
               end
           | _ -> ""
           end
       | _ -> raise Not_found
       end
   | "psources" ->
-      if p_auth && not conf.no_note then
-        let env = ['i', (fun () -> Util.default_image_name base p)] in
-        let s = sou base (get_psources p) in
-        let s = string_with_macros conf env s in
-        let lines = Wiki.html_of_tlsw conf s in
-        let wi =
-          {Wiki.wi_mode = "NOTES"; Wiki.wi_cancel_links = conf.cancel_links;
-           Wiki.wi_file_path = Notes.file_path conf base;
-           Wiki.wi_person_exists = person_exists conf base;
-           Wiki.wi_always_show_link = conf.wizard || conf.friend}
-        in
-        let s = Wiki.syntax_links conf wi (String.concat "\n" lines) in
-        Util.safe_html @@ if conf.pure_xhtml then Util.check_xhtml s else s
-      else ""
+      let env = ['i', (fun () -> Util.default_image_name base p)] in
+      get_note_source conf base env p_auth false
+        (sou base (get_psources p))
   | "slash_burial_date" ->
       begin match get_burial p with
         Buried cod ->
           begin match p_auth, Adef.od_of_cdate cod with
-            true, Some d -> Date.string_slash_of_date conf d
+            true, Some d -> DateDisplay.string_slash_of_date conf d
           | _ -> ""
           end
       | _ -> raise Not_found
@@ -4450,8 +4251,8 @@ and eval_str_person_field conf base env (p, p_auth as ep) =
             true, Some d ->
               begin match p_getenv conf.base_env "long_date" with
                 Some "yes" ->
-                  Date.string_of_ondate conf d ^ Date.get_wday conf d
-              | _ -> Date.string_of_ondate conf d
+                  DateDisplay.string_of_ondate conf d ^ DateDisplay.get_wday conf d
+              | _ -> DateDisplay.string_of_ondate conf d
               end
           | _ -> ""
           end
@@ -4461,7 +4262,7 @@ and eval_str_person_field conf base env (p, p_auth as ep) =
       begin match get_burial p with
         Cremated cod ->
           begin match p_auth, Adef.od_of_cdate cod with
-            true, Some d -> Date.string_slash_of_date conf d
+            true, Some d -> DateDisplay.string_slash_of_date conf d
           | _ -> ""
           end
       | _ -> raise Not_found
@@ -4471,39 +4272,39 @@ and eval_str_person_field conf base env (p, p_auth as ep) =
         true, Death (_, d) ->
           let d = Adef.date_of_cdate d in
           begin match p_getenv conf.base_env "long_date" with
-            Some "yes" -> Date.string_of_ondate conf d ^ Date.get_wday conf d
-          | _ -> Date.string_of_ondate conf d
+            Some "yes" -> DateDisplay.string_of_ondate conf d ^ DateDisplay.get_wday conf d
+          | _ -> DateDisplay.string_of_ondate conf d
           end
       | _ -> ""
       end
   | "slash_death_date" ->
       begin match p_auth, get_death p with
         true, Death (_, d) ->
-          let d = Adef.date_of_cdate d in Date.string_slash_of_date conf d
+          let d = Adef.date_of_cdate d in DateDisplay.string_slash_of_date conf d
       | _ -> ""
       end
   | "slash_approx_death_date" ->
       begin match
         p_auth, fst (Util.get_approx_death_date_place conf base p)
       with
-        true, Some d -> Date.string_slash_of_date conf d
+        true, Some d -> DateDisplay.string_slash_of_date conf d
       | _ -> ""
       end
   | "prev_fam_father" ->
       begin match get_env "prev_fam" env with
         Vfam (_, _, (ifath, _, _), _) ->
-          string_of_int (Adef.int_of_iper ifath)
+          string_of_iper ifath
       | _ -> raise Not_found
       end
   | "prev_fam_index" ->
       begin match get_env "prev_fam" env with
-        Vfam (ifam, _, _, _) -> string_of_int (Adef.int_of_ifam ifam)
+        Vfam (ifam, _, _, _) -> string_of_ifam ifam
       | _ -> raise Not_found
       end
   | "prev_fam_mother" ->
       begin match get_env "prev_fam" env with
         Vfam (_, _, (_, imoth, _), _) ->
-          string_of_int (Adef.int_of_iper imoth)
+          string_of_iper imoth
       | _ -> raise Not_found
       end
   | "public_name" ->
@@ -4521,7 +4322,7 @@ and eval_str_person_field conf base env (p, p_auth as ep) =
   | "sosa_in_list" ->
       begin match get_env "all_gp" env with
         Vallgp all_gp ->
-          begin match get_link all_gp (get_key_index p) with
+          begin match get_link all_gp (get_iper p) with
             Some (GP_person (s, _, _)) -> Sosa.to_string s
           | _ -> ""
           end
@@ -4532,9 +4333,10 @@ and eval_str_person_field conf base env (p, p_auth as ep) =
         Vsosa x ->
           begin match get_sosa conf base env x p with
             Some (n, q) ->
-              Printf.sprintf "m=RL&i1=%d&i2=%d&b1=1&b2=%s"
-                (Adef.int_of_iper (get_key_index p))
-                (Adef.int_of_iper (get_key_index q)) (Sosa.to_string n)
+              Printf.sprintf "m=RL&i1=%s&i2=%s&b1=1&b2=%s"
+                (string_of_iper (get_iper p))
+                (string_of_iper (get_iper q))
+                (Sosa.to_string n)
           | None -> ""
           end
       | _ -> raise Not_found
@@ -4618,15 +4420,15 @@ and eval_str_family_field env (ifam, _, _, _) =
       begin match get_env "desc_level_table" env with
         Vdesclevtab levt ->
           let (_, flevt) = Lazy.force levt in
-          string_of_int flevt.(Adef.int_of_ifam ifam)
+          string_of_int (Gwdb.Marker.get flevt ifam)
       | _ -> raise Not_found
       end
-  | "index" -> string_of_int (Adef.int_of_ifam ifam)
+  | "index" -> string_of_ifam ifam
   | "set_infinite_desc_level" ->
       begin match get_env "desc_level_table" env with
         Vdesclevtab levt ->
           let (_, flevt) = Lazy.force levt in
-          flevt.(Adef.int_of_ifam ifam) <- infinite; ""
+          Gwdb.Marker.set flevt ifam infinite; ""
       | _ -> raise Not_found
       end
   | _ -> raise Not_found
@@ -4680,7 +4482,7 @@ and string_of_parent_age conf base (p, p_auth) parent =
           Adef.od_of_cdate (get_birth pp), Adef.od_of_cdate (get_birth p)
         with
           Some (Dgreg (d1, _)), Some (Dgreg (d2, _)) ->
-            Date.string_of_age conf (CheckItem.time_elapsed d1 d2)
+            DateDisplay.string_of_age conf (Date.time_elapsed d1 d2)
         | _ -> ""
       else ""
   | None -> raise Not_found
@@ -4741,10 +4543,10 @@ let eval_transl conf base env upp s c =
                 match get_env "p" env with
                   Vind p ->
                     let n =
-                      List.fold_left
+                      Array.fold_left
                         (fun n ifam ->
                            n + Array.length (get_children (foi base ifam)))
-                        0 (Array.to_list (get_family p))
+                        0 (get_family p)
                     in
                     if n <= 1 then 0 else 1
                 | _ -> 0
@@ -4818,13 +4620,13 @@ let print_foreach conf base print_ast eval_expr =
                 | _ -> conf
               in
               match
-                Perso_link.get_parents_link conf.command (get_key_index a)
+                Perso_link.get_parents_link conf.command (get_iper a)
               with
                 Some family ->
                   let (ifath, imoth, ifam) =
-                    Adef.iper_of_int (Int32.to_int family.MLink.Family.ifath),
-                    Adef.iper_of_int (Int32.to_int family.MLink.Family.imoth),
-                    Adef.ifam_of_int (Int32.to_int family.MLink.Family.ifam)
+                    Gwdb.iper_of_string @@ Int32.to_string family.MLink.Family.ifath,
+                    Gwdb.iper_of_string @@ Int32.to_string family.MLink.Family.imoth,
+                    Gwdb.ifam_of_string @@ Int32.to_string family.MLink.Family.ifam
                   in
                   begin match
                     Perso_link.get_person_link family.MLink.Family.baseprefix
@@ -4873,13 +4675,13 @@ let print_foreach conf base print_ast eval_expr =
                 | _ -> conf
               in
               match
-                Perso_link.get_parents_link conf.command (get_key_index a)
+                Perso_link.get_parents_link conf.command (get_iper a)
               with
                 Some family ->
                   let (ifath, imoth, ifam) =
-                    Adef.iper_of_int (Int32.to_int family.MLink.Family.ifath),
-                    Adef.iper_of_int (Int32.to_int family.MLink.Family.imoth),
-                    Adef.ifam_of_int (Int32.to_int family.MLink.Family.ifam)
+                    Gwdb.iper_of_string @@ Int32.to_string family.MLink.Family.ifath,
+                    Gwdb.iper_of_string @@ Int32.to_string family.MLink.Family.imoth,
+                    Gwdb.ifam_of_string @@ Int32.to_string family.MLink.Family.ifam
                   in
                   begin match
                     Perso_link.get_person_link family.MLink.Family.baseprefix
@@ -5023,7 +4825,7 @@ let print_foreach conf base print_ast eval_expr =
           end
       | _ -> raise Not_found
     in
-    let mark = Array.make (nb_of_persons base) Sosa.zero in
+    let mark = Gwdb.iper_marker (Gwdb.ipers base) Sosa.zero in
     let rec loop gpl i n =
       if i > max_level then ()
       else
@@ -5041,7 +4843,7 @@ let print_foreach conf base print_ast eval_expr =
         List.iter (print_ast env ep) al;
         let gpl = next_generation conf base mark gpl in loop gpl (succ i) n
     in
-    loop [GP_person (Sosa.one, get_key_index p, None)] 1 0
+    loop [GP_person (Sosa.one, get_iper p, None)] 1 0
   and print_foreach_ancestor_level2 env al (p, _ as ep) =
     let max_lev = "max_anc_level" in
     let max_level =
@@ -5049,16 +4851,16 @@ let print_foreach conf base print_ast eval_expr =
         Vint n -> n
       | _ -> 0
     in
-    let mark = Array.make (nb_of_persons base) Sosa.zero in
+    let mark = Gwdb.iper_marker (Gwdb.ipers base) Sosa.zero in
     let rec loop gpl i =
       if i > max_level then ()
       else
         let env = ("gpl", Vgpl gpl) :: ("level", Vint i) :: env in
         List.iter (print_ast env ep) al;
-        for i = 0 to nb_of_persons base - 1 do mark.(i) <- Sosa.zero done;
+        Gwdb.Collection.iter (fun i -> Gwdb.Marker.set mark i Sosa.zero) (Gwdb.ipers base) ;
         let gpl = next_generation2 conf base mark gpl in loop gpl (succ i)
     in
-    loop [GP_person (Sosa.one, get_key_index p, None)] 1
+    loop [GP_person (Sosa.one, get_iper p, None)] 1
   and print_foreach_anc_surn env el al loc (p, _ as ep) =
     let max_level =
       match el with
@@ -5096,9 +4898,9 @@ let print_foreach conf base print_ast eval_expr =
     let (p, max_level) =
       match el with
         [[e1]; [e2]] ->
-          let ip = eval_int_expr env ep e1 in
+          let ip = iper_of_string @@ eval_expr env ep e1 in
           let max_level = eval_int_expr env ep e2 in
-          pget conf base (Adef.iper_of_int ip), max_level
+          pget conf base ip, max_level
       | [[e]] -> p, eval_int_expr env ep e
       | [] ->
           begin match get_env "max_anc_level" env with
@@ -5125,13 +4927,17 @@ let print_foreach conf base print_ast eval_expr =
         [] -> ()
       | (name, _, _, _, _, wl, _) :: events ->
           if name = Pevent Epers_Baptism then
-            Mutil.list_iter_first
-              (fun first (ip, _) ->
-                 let p = pget conf base ip in
-                 let env = ("baptism_witness", Vind p) :: env in
-                 let env = ("first", Vbool first) :: env in
-                 List.iter (print_ast env ep) al)
-              (Array.to_list wl)
+            Array.iteri
+              begin fun i (ip, _) ->
+                let p = pget conf base ip in
+                let env =
+                  ("baptism_witness", Vind p)
+                  :: ("first", Vbool (i = 0))
+                  :: env
+                in
+                List.iter (print_ast env ep) al
+              end
+              wl
           else loop events
     in
     loop (events_list conf base p)
@@ -5141,13 +4947,17 @@ let print_foreach conf base print_ast eval_expr =
         [] -> ()
       | (name, _, _, _, _, wl, _) :: events ->
           if name = Pevent Epers_Birth then
-            Mutil.list_iter_first
-              (fun first (ip, _) ->
-                 let p = pget conf base ip in
-                 let env = ("birth_witness", Vind p) :: env in
-                 let env = ("first", Vbool first) :: env in
-                 List.iter (print_ast env ep) al)
-              (Array.to_list wl)
+            Array.iteri
+              begin fun i (ip, _) ->
+                let p = pget conf base ip in
+                let env =
+                  ("birth_witness", Vind p)
+                  :: ("first", Vbool (i = 0))
+                  :: env
+                in
+                List.iter (print_ast env ep) al
+              end
+              wl
           else loop events
     in
     loop (events_list conf base p)
@@ -5157,13 +4967,17 @@ let print_foreach conf base print_ast eval_expr =
         [] -> ()
       | (name, _, _, _, _, wl, _) :: events ->
           if name = Pevent Epers_Burial then
-            Mutil.list_iter_first
-              (fun first (ip, _) ->
-                 let p = pget conf base ip in
-                 let env = ("burial_witness", Vind p) :: env in
-                 let env = ("first", Vbool first) :: env in
-                 List.iter (print_ast env ep) al)
-              (Array.to_list wl)
+            Array.iteri
+              begin fun i (ip, _) ->
+                let p = pget conf base ip in
+                let env =
+                  ("burial_witness", Vind p)
+                  :: ("first", Vbool (i = 0))
+                  :: env
+                in
+                List.iter (print_ast env ep) al
+              end
+              wl
           else loop events
     in
     loop (events_list conf base p)
@@ -5209,9 +5023,9 @@ let print_foreach conf base print_ast eval_expr =
 #endif
         | _ ->
             let auth =
-              List.for_all
+              Array.for_all
                 (fun ip -> authorized_age conf base (pget conf base ip))
-                (Array.to_list (get_children fam))
+                (get_children fam)
             in
             let env = ("auth", Vbool auth) :: env in
             let n =
@@ -5222,7 +5036,7 @@ let print_foreach conf base print_ast eval_expr =
               in
               let rec loop i =
                 if i = Array.length (get_children fam) then -2
-                else if (get_children fam).(i) = get_key_index p then i
+                else if (get_children fam).(i) = get_iper p then i
                 else loop (i + 1)
               in
               loop 0
@@ -5248,7 +5062,7 @@ let print_foreach conf base print_ast eval_expr =
             (* On ajoute les enfants distants. *)
             let faml =
               Perso_link.get_families_of_parents conf.command
-                (get_key_index (fst ep)) isp
+                (get_iper (fst ep)) isp
             in
             List.iter
               (fun fam_link ->
@@ -5256,10 +5070,7 @@ let print_foreach conf base print_ast eval_expr =
                  List.iter
                    (fun c_link ->
                       let baseprefix = c_link.MLink.Person_link.baseprefix in
-                      let ip_c =
-                        Adef.iper_of_int
-                          (Int32.to_int c_link.MLink.Person_link.ip)
-                      in
+                      let ip_c = Gwdb.iper_of_string @@ Int32.to_string c_link.MLink.Person_link.ip in
                       match Perso_link.get_person_link baseprefix ip_c with
                         Some c_link ->
                           let can_merge =
@@ -5295,13 +5106,17 @@ let print_foreach conf base print_ast eval_expr =
         [] -> ()
       | (name, _, _, _, _, wl, _) :: events ->
           if name = Pevent Epers_Cremation then
-            Mutil.list_iter_first
-              (fun first (ip, _) ->
-                 let p = pget conf base ip in
-                 let env = ("cremation_witness", Vind p) :: env in
-                 let env = ("first", Vbool first) :: env in
-                 List.iter (print_ast env ep) al)
-              (Array.to_list wl)
+            Array.iteri
+              begin fun i (ip, _) ->
+                let p = pget conf base ip in
+                let env =
+                  ("cremation_witness", Vind p)
+                  :: ("first", Vbool (i = 0))
+                  :: env
+                in
+                List.iter (print_ast env ep) al
+              end
+              wl
           else loop events
     in
     loop (events_list conf base p)
@@ -5311,13 +5126,17 @@ let print_foreach conf base print_ast eval_expr =
         [] -> ()
       | (name, _, _, _, _, wl, _) :: events ->
           if name = Pevent Epers_Death then
-            Mutil.list_iter_first
-              (fun first (ip, _) ->
-                 let p = pget conf base ip in
-                 let env = ("death_witness", Vind p) :: env in
-                 let env = ("first", Vbool first) :: env in
-                 List.iter (print_ast env ep) al)
-              (Array.to_list wl)
+            Array.iteri
+              begin fun i (ip, _) ->
+                let p = pget conf base ip in
+                let env =
+                  ("death_witness", Vind p)
+                  :: ("first", Vbool (i = 0))
+                  :: env
+                in
+                List.iter (print_ast env ep) al
+              end
+              wl
           else loop events
     in
     loop (events_list conf base p)
@@ -5346,15 +5165,18 @@ let print_foreach conf base print_ast eval_expr =
     if p_auth then
       match get_env "event" env with
         Vevent (_, (_, _, _, _, _, witnesses, _)) ->
-          let witnesses = Array.to_list witnesses in
-          Mutil.list_iter_first
-            (fun first (ip, wk) ->
-               let p = pget conf base ip in
-               let wk = Util.string_of_witness_kind conf (get_sex p) wk in
-               let env = ("event_witness", Vind p) :: env in
-               let env = ("event_witness_kind", Vstring wk) :: env in
-               let env = ("first", Vbool first) :: env in
-               List.iter (print_ast env ep) al)
+          Array.iteri
+            begin fun i (ip, wk) ->
+              let p = pget conf base ip in
+              let wk = Util.string_of_witness_kind conf (get_sex p) wk in
+              let env =
+                ("event_witness", Vind p)
+                :: ("event_witness_kind", Vstring wk)
+                :: ("first", Vbool (i = 0))
+                :: env
+              in
+              List.iter (print_ast env ep) al
+            end
             witnesses
       | _ -> ()
   and print_foreach_event_witness_relation env al (p, p_auth as ep) =
@@ -5367,7 +5189,7 @@ let print_foreach conf base print_ast eval_expr =
             let c = pget conf base ic in
             List.iter
               (fun (name, _, _, _, _, wl, _ as evt) ->
-                 let (mem, wk) = Util.array_mem_witn conf base (get_key_index p) wl in
+                 let (mem, wk) = Util.array_mem_witn conf base (get_iper p) wl in
                  if mem then
                    match name with
                      Fevent _ ->
@@ -5384,11 +5206,11 @@ let print_foreach conf base print_ast eval_expr =
     (* On tri les témoins dans le même ordre que les évènements. *)
     let events_witnesses =
       CheckItem.sort_events
-        ((fun (_, _, (name, _, _, _, _, _, _)) ->
-            match name with
-              Pevent n -> CheckItem.Psort n
-            | Fevent n -> CheckItem.Fsort n),
-         (fun (_, _, (_, date, _, _, _, _, _)) -> date))
+        (fun (_, _, (name, _, _, _, _, _, _)) ->
+           match name with
+           | Pevent n -> CheckItem.Psort n
+           | Fevent n -> CheckItem.Fsort n)
+        (fun (_, _, (_, date, _, _, _, _, _)) -> date)
         events_witnesses
     in
     List.iter
@@ -5408,7 +5230,7 @@ let print_foreach conf base print_ast eval_expr =
           | _ -> conf
         in
         let faml =
-          Perso_link.get_family_link conf.command (get_key_index p)
+          Perso_link.get_family_link conf.command (get_iper p)
         in
         let rec loop prev i faml =
           match faml with
@@ -5419,21 +5241,19 @@ let print_foreach conf base print_ast eval_expr =
                 Perso_link.make_efam_link conf base fam_link
               in
               let (ifath, imoth, ifam) =
-                Adef.iper_of_int (Int32.to_int fam_link.MLink.Family.ifath),
-                Adef.iper_of_int (Int32.to_int fam_link.MLink.Family.imoth),
-                Adef.ifam_of_int (Int32.to_int fam_link.MLink.Family.ifam)
+                Gwdb.iper_of_string @@ Int32.to_string fam_link.MLink.Family.ifath,
+                Gwdb.iper_of_string @@ Int32.to_string fam_link.MLink.Family.imoth,
+                Gwdb.ifam_of_string @@ Int32.to_string fam_link.MLink.Family.ifam
               in
               let cpl =
-                let ip = get_key_index p in
+                let ip = get_iper p in
                 if ip <> ifath && ip <> imoth then
                   match
                     Perso_link.get_person_link_with_base conf.command ip
                       baseprefix
                   with
                     Some p ->
-                      let ip =
-                        Adef.iper_of_int (Int32.to_int p.MLink.Person.ip)
-                      in
+                      let ip = Gwdb.iper_of_string @@ Int32.to_string p.MLink.Person.ip in
                       ifath, imoth, (if ip = ifath then imoth else ifath)
                   | None ->
                       ifath, imoth, (if ip = ifath then imoth else ifath)
@@ -5467,7 +5287,7 @@ let print_foreach conf base print_ast eval_expr =
               let fam = foi base ifam in
               let ifath = get_father fam in
               let imoth = get_mother fam in
-              let ispouse = Gutil.spouse (get_key_index p) fam in
+              let ispouse = Gutil.spouse (get_iper p) fam in
               let cpl = ifath, imoth, ispouse in
               let m_auth =
                 authorized_age conf base (pget conf base ifath) &&
@@ -5489,7 +5309,7 @@ let print_foreach conf base print_ast eval_expr =
 #ifdef API
         (* On ajoute les familles distantes. *)
         let faml =
-          Perso_link.get_family_link conf.command (get_key_index p)
+          Perso_link.get_family_link conf.command (get_iper p)
         in
         let rec loop prev i faml =
           match faml with
@@ -5499,21 +5319,19 @@ let print_foreach conf base print_ast eval_expr =
                 Perso_link.make_efam_link conf base fam_link
               in
               let (ifath, imoth, ifam) =
-                Adef.iper_of_int (Int32.to_int fam_link.MLink.Family.ifath),
-                Adef.iper_of_int (Int32.to_int fam_link.MLink.Family.imoth),
-                Adef.ifam_of_int (Int32.to_int fam_link.MLink.Family.ifam)
+                Gwdb.iper_of_string @@ Int32.to_string fam_link.MLink.Family.ifath,
+                Gwdb.iper_of_string @@ Int32.to_string fam_link.MLink.Family.imoth,
+                Gwdb.ifam_of_string @@ Int32.to_string fam_link.MLink.Family.ifam
               in
               let cpl =
-                let ip = get_key_index p in
+                let ip = get_iper p in
                 if ip <> ifath && ip <> imoth then
                   match
                     Perso_link.get_person_link_with_base conf.command ip
                       fam_link.MLink.Family.baseprefix
                   with
                     Some p ->
-                      let ip =
-                        Adef.iper_of_int (Int32.to_int p.MLink.Person.ip)
-                      in
+                      let ip = Gwdb.iper_of_string @@ Int32.to_string p.MLink.Person.ip in
                       ifath, imoth, (if ip = ifath then imoth else ifath)
                   | None ->
                       ifath, imoth, (if ip = ifath then imoth else ifath)
@@ -5523,7 +5341,7 @@ let print_foreach conf base print_ast eval_expr =
                 let fam =
                   List.map (foi base) (Array.to_list (get_family p))
                 in
-                Perso_link.can_merge_family conf.command (get_key_index p) fam
+                Perso_link.can_merge_family conf.command (get_iper p) fam
                   fam_link cpl
               in
               if can_merge then loop None i faml
@@ -5618,11 +5436,11 @@ let print_foreach conf base print_ast eval_expr =
                function
                  r :: rl ->
                    begin match r.r_fath with
-                     Some ip when ip = get_key_index p ->
+                     Some ip when ip = get_iper p ->
                        loop ((c, r) :: list) rl
                    | _ ->
                        match r.r_moth with
-                         Some ip when ip = get_key_index p ->
+                         Some ip when ip = get_iper p ->
                            loop ((c, r) :: list) rl
                        | _ -> loop list rl
                    end
@@ -5645,8 +5463,7 @@ let print_foreach conf base print_ast eval_expr =
                | x -> x
              in
              match d1, d2 with
-               Some d1, Some d2 ->
-                 if CheckItem.strictly_before d1 d2 then -1 else 1
+               Some d1, Some d2 -> Date.compare_date d1 d2
              | _ -> -1)
           (List.rev list)
       in
@@ -5732,7 +5549,7 @@ let print_foreach conf base print_ast eval_expr =
           Array.fold_left
             (fun (srcl, i) ifam ->
                let fam = foi base ifam in
-               let isp = Gutil.spouse (get_key_index p) fam in
+               let isp = Gutil.spouse (get_iper p) fam in
                let sp = poi base isp in
                (* On sait que p_auth vaut vrai. *)
                let m_auth = authorized_age conf base sp in
@@ -5788,13 +5605,17 @@ let print_foreach conf base print_ast eval_expr =
   and print_foreach_witness env al ep =
     function
       Vfam (_, fam, _, true) ->
-        Mutil.list_iter_first
-          (fun first ip ->
-             let p = pget conf base ip in
-             let env = ("witness", Vind p) :: env in
-             let env = ("first", Vbool first) :: env in
-             List.iter (print_ast env ep) al)
-          (Array.to_list (get_witnesses fam))
+      Array.iteri
+        begin fun i ip ->
+          let p = pget conf base ip in
+          let env =
+            ("witness", Vind p)
+            :: ("first", Vbool (i = 0))
+            :: env
+          in
+          List.iter (print_ast env ep) al
+        end
+        (get_witnesses fam)
     | _ -> ()
   and print_foreach_witness_relation env al (p, _ as ep) =
     let list =
@@ -5808,7 +5629,7 @@ let print_foreach conf base print_ast eval_expr =
               Array.iter
                 (fun ifam ->
                    let fam = foi base ifam in
-                   if Array.mem (get_key_index p) (get_witnesses fam) then
+                   if Array.mem (get_iper p) (get_witnesses fam) then
                      list := (ifam, fam) :: !list)
                 (get_family (pget conf base ic));
             make_list icl
@@ -5825,10 +5646,7 @@ let print_foreach conf base print_ast eval_expr =
              Adef.od_of_cdate (get_marriage fam1),
              Adef.od_of_cdate (get_marriage fam2)
            with
-             Some d1, Some d2 ->
-               if CheckItem.strictly_before d1 d2 then -1
-               else if CheckItem.strictly_before d2 d1 then 1
-               else 0
+           | Some d1, Some d2 -> Date.compare_date d1 d2
            | _ -> 0)
         list
     in
@@ -5914,10 +5732,8 @@ let gen_interp_templ menu title templ_fname conf base p =
     let sosa_ref_l = let sosa_ref () = sosa_ref in Lazy.from_fun sosa_ref in
     let t_sosa =
       match sosa_ref with
-        Some p -> init_sosa_t conf base p
-      | _ ->
-          {tstab = [| |]; mark = [| |]; last_zil = [];
-           sosa_ht = Hashtbl.create 1}
+      | Some p -> Some (init_sosa_t conf base p)
+      | _ -> None
     in
     let desc_level_table_l =
       let dlt () = make_desc_level_table conf base emal p in Lazy.from_fun dlt
@@ -5930,17 +5746,17 @@ let gen_interp_templ menu title templ_fname conf base p =
       let dlt () = make_desc_level_table conf base emal p in Lazy.from_fun dlt
     in
     let mal () =
-      Vint (max_ancestor_level conf base (get_key_index p) emal + 1)
+      Vint (max_ancestor_level conf base (get_iper p) emal + 1)
     in
     (* Static max ancestor level *)
     let smal () =
-      Vint (max_ancestor_level conf base (get_key_index p) 120 + 1)
+      Vint (max_ancestor_level conf base (get_iper p) 120 + 1)
     in
     (* Sosa_ref max ancestor level *)
     let srmal () =
       match Util.find_sosa_ref conf base with
       | Some sosa_ref ->
-        Vint (max_ancestor_level conf base (get_key_index sosa_ref) 120 + 1)
+        Vint (max_ancestor_level conf base (get_iper sosa_ref) 120 + 1)
       | _ -> Vint 0
     in
     let mcl () = Vint (max_cousin_level conf base p) in
@@ -5948,16 +5764,16 @@ let gen_interp_templ menu title templ_fname conf base p =
     let mdl () =
 #ifdef API
       Vint
-        (max (max_descendant_level desc_level_table_l)
+        (max (max_descendant_level base desc_level_table_l)
            (Perso_link.max_interlinks_descendancy_level conf base
-              (get_key_index p) 10))
+              (get_iper p) 10))
 #else
-      Vint (max_descendant_level desc_level_table_l)
+      Vint (max_descendant_level base desc_level_table_l)
 #endif
     in
     (* Static max descendant level *)
     let smdl () =
-      Vint (max_descendant_level desc_level_table_m)
+      Vint (max_descendant_level base desc_level_table_m)
     in
     let nldb () =
       let bdir = Util.base_path [] (conf.bname ^ ".gwb") in
@@ -5974,7 +5790,7 @@ let gen_interp_templ menu title templ_fname conf base p =
      ("list", Vslist (ref SortedList.empty));
      ("listb", Vslist (ref SortedList.empty));
      ("listc", Vslist (ref SortedList.empty));
-     ("desc_mark", Vdmark (ref [| |]));
+     ("desc_mark", Vdmark (ref @@ Gwdb.dummy_marker Gwdb.dummy_iper false));
      ("lazy_print", Vlazyp (ref None));
      ("sosa",  Vsosa (ref []));
      ("sosa_ref", Vsosa_ref sosa_ref_l);
@@ -6062,7 +5878,7 @@ let print_ancestors_dag conf base v p =
             loop set (lev - 1) (get_father cpl)
         | None -> set
     in
-    loop Dag.Pset.empty v (get_key_index p)
+    loop Dag.Pset.empty v (get_iper p)
   in
   let elem_txt p = Dag.Item (p, "") in
   (* Récupère les options d'affichage. *)

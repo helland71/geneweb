@@ -8,7 +8,6 @@ open Util
 module StrSet = Mutil.StrSet
 
 module Make
-    (Wserver : module type of Wserver)
     (Request : Request.MakeOut)
   : (sig val run : ?speclist:(string * Arg.spec * string) list -> unit -> unit end)
 = struct
@@ -140,7 +139,7 @@ let http status =
 
 let robots_txt () =
   Log.with_log (fun oc -> Printf.fprintf oc "Robot request\n");
-  Wserver.http HttpStatus.OK;
+  Wserver.http Wserver.OK;
   Wserver.header "Content-type: text/plain";
   if copy_file "robots" then ()
   else
@@ -151,7 +150,7 @@ let refuse_log from =
     (fun oc ->
        let tm = Unix.localtime (Unix.time ()) in
        Util.fprintf_date oc tm; Printf.fprintf oc " excluded: %s\n" from);
-  http HttpStatus.Forbidden;
+  http Wserver.Forbidden;
   Wserver.header "Content-type: text/html";
   Wserver.printf "Your access has been disconnected by administrator.\n";
   let _ = (copy_file "refuse" : bool) in ()
@@ -167,7 +166,7 @@ let only_log from =
          (fun first s -> Printf.fprintf oc "%s%s" (if not first then "," else "") s)
          !only_addresses;
        Printf.fprintf oc ")\n");
-  http HttpStatus.OK;
+  http Wserver.OK;
   Wserver.header "Content-type: text/html; charset=iso-8859-1";
   Wserver.printf "<head><title>Invalid access</title></head>\n";
   Wserver.printf "<body><h1>Invalid access</h1></body>\n"
@@ -293,12 +292,7 @@ let print_renamed conf new_n =
   | None ->
       let title _ = Wserver.printf "%s -&gt; %s" conf.bname new_n in
       Hutil.header conf title;
-      Wserver.printf "<ul>\n";
-      Util.html_li conf;
-      Wserver.printf "<a href=\"%s\">\n" link;
-      Wserver.printf "%s" link;
-      Wserver.printf "</a>\n";
-      Wserver.printf "</ul>\n";
+      Wserver.printf "<ul><li><a href=\"%s\">%s</a></li></ul>" link link ;
       Hutil.trailer conf
 
 let log_redirect from request req =
@@ -327,27 +321,20 @@ let print_redirected conf from request new_addr =
       let title _ = Wserver.printf "Address changed" in
       Hutil.header conf title;
       Wserver.printf "Use the following address:\n<p>\n";
-      Wserver.printf "<ul>\n";
-      Util.html_li conf;
-      Wserver.printf "<a href=\"%s\">" link;
-      Wserver.printf "%s" link;
-      Wserver.printf "</a>";
-      Wserver.printf "\n";
-      Wserver.printf "</ul>\n";
+      Wserver.printf "<ul><li><a href=\"%s\">%s</a></li></ul>" link link ;
       Hutil.trailer conf
 
 let propose_base conf =
   let title _ = Wserver.printf "Base" in
   Hutil.header conf title;
-  Wserver.printf "<ul>\n";
-  Util.html_li conf;
+  Wserver.printf "<ul><li>";
   Wserver.printf "<form method=\"get\" action=\"%s\">\n" conf.indep_command;
   Wserver.printf "<input name=\"b\" size=\"40\"> =&gt;\n";
   Wserver.printf
     "<button type=\"submit\" class=\"btn btn-secondary btn-lg\">\n";
   Wserver.printf "%s" (capitale (transl_nth conf "validate/delete" 0));
   Wserver.printf "</button>\n";
-  Wserver.printf "</ul>\n";
+  Wserver.printf "</li></ul>";
   Hutil.trailer conf
 
 let general_welcome conf =
@@ -402,7 +389,7 @@ let trace_auth base_env f =
 
 let unauth_server conf ar =
   let typ = if ar.ar_passwd = "w" then "Wizard" else "Friend" in
-  Wserver.http HttpStatus.Unauthorized;
+  Wserver.http Wserver.Unauthorized;
   if !use_auth_digest_scheme then
     let nonce = digest_nonce conf.ctime in
     let _ =
@@ -629,7 +616,7 @@ let index_not_name s =
   loop 0
 
 let print_request_failure msg =
-  http HttpStatus.OK;
+  http Wserver.OK;
   Wserver.header "Content-type: text/html";
   Wserver.printf "<head><title>Request failure</title></head>\n";
   Wserver.printf
@@ -653,7 +640,7 @@ let refresh_url request b_arg_for_basename bname =
     in
     serv ^ req
   in
-  http HttpStatus.OK;
+  http Wserver.OK;
   Wserver.header "Content-type: text/html";
   Wserver.printf "<head>\n\
                   <meta http-equiv=\"REFRESH\"\n\
@@ -1149,7 +1136,7 @@ let make_conf from_addr request script_name env =
     !lexicon_list;
   (* A l'initialisation de la config, il n'y a pas de sosa_ref. *)
   (* Il sera mis à jour par effet de bord dans request.ml       *)
-  let default_sosa_ref = Adef.iper_of_int (-1), None in
+  let default_sosa_ref = Gwdb.dummy_iper, None in
   let ar =
     authorization from_addr request base_env passwd access_type utm base_file
       command
@@ -1508,7 +1495,7 @@ type misc_fname =
   | Other of string
 
 let content_misc len misc_fname =
-  Wserver.http HttpStatus.OK;
+  Wserver.http Wserver.OK;
   let (fname, t) =
     match misc_fname with
       Css fname -> fname, "text/css"
@@ -1525,6 +1512,7 @@ let content_misc len misc_fname =
   Wserver.header "Content-length: %d" len;
   Wserver.header "Content-disposition: inline; filename=%s"
     (Filename.basename fname);
+  Wserver.header "Cache-control: private, max-age=%d" (60 * 60 * 24 * 365);
   Wserver.wflush ()
 
 let print_misc_file misc_fname =
@@ -1786,7 +1774,7 @@ let robot_exclude_arg s =
   with _ ->
     Printf.eprintf "Bad use of option -robot_xcl\n";
     Printf.eprintf "Use option -help for usage.\n";
-    flush Pervasives.stderr;
+    flush Stdlib.stderr;
     exit 2
 
 let slashify s =

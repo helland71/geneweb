@@ -5,9 +5,6 @@ open Config
 open Def
 open Gwdb
 
-let rm fname =
-  if Sys.file_exists fname then Sys.remove fname
-
 let is_hide_names conf p =
   if conf.hide_names || get_access p = Private then true else false
 
@@ -322,14 +319,6 @@ let begin_centered conf =
     conf.border
 let end_centered _conf = Wserver.printf "</td></tr></table>\n"
 
-let html_br conf = Wserver.printf "<br%s>\n" conf.xhs
-
-let html_p _conf = Wserver.printf "<p>"; Wserver.printf "\n"
-
-let html_li _conf = Wserver.printf "<li>"; Wserver.printf "\n"
-
-let nl () = Wserver.printf "\013\010"
-
 let week_day_txt =
   let txt = [| "Sun"; "Mon"; "Tue"; "Wed"; "Thu"; "Fri"; "Sat" |] in
   fun i -> let i = if i < 0 || i >= Array.length txt then 0 else i in txt.(i)
@@ -364,7 +353,7 @@ let html ?content_type conf =
   Wserver.header "Content-type: %s; charset=%s" content_type charset
 
 let unauthorized conf auth_type =
-  Wserver.http HttpStatus.Unauthorized;
+  Wserver.http Wserver.Unauthorized;
   if not !(Wserver.cgi) then
     Wserver.header "WWW-Authenticate: Basic realm=\"%s\"" auth_type;
   Wserver.header "Content-type: text/html; charset=%s" conf.charset;
@@ -626,17 +615,17 @@ let strictly_after_private_years conf a =
 let is_old_person conf p =
   match
     Adef.od_of_cdate p.birth, Adef.od_of_cdate p.baptism, p.death,
-    CheckItem.date_of_death p.death
+    Date.date_of_death p.death
   with
     _, _, NotDead, _ when conf.private_years > 0 -> false
   | Some (Dgreg (d, _)), _, _, _ ->
-      let a = CheckItem.time_elapsed d conf.today in
+      let a = Date.time_elapsed d conf.today in
       strictly_after_private_years conf a
   | _, Some (Dgreg (d, _)), _, _ ->
-      let a = CheckItem.time_elapsed d conf.today in
+      let a = Date.time_elapsed d conf.today in
       strictly_after_private_years conf a
   | _, _, _, Some (Dgreg (d, _)) ->
-      let a = CheckItem.time_elapsed d conf.today in
+      let a = Date.time_elapsed d conf.today in
       strictly_after_private_years conf a
   | None, None, DontKnowIfDead, None ->
       p.access <> Private && conf.public_if_no_date
@@ -689,7 +678,7 @@ let authorized_age conf base p =
     else
       let check_date none = function
         | Some (Dgreg (d, _)) ->
-          strictly_after_private_years conf (CheckItem.time_elapsed d conf.today)
+          strictly_after_private_years conf (Date.time_elapsed d conf.today)
         | _ -> none ()
       in
       check_date
@@ -710,18 +699,18 @@ let authorized_age conf base p =
                        in
                        loop 0
                      end)
-                  (CheckItem.date_of_death (get_death p)) )
+                  (Date.date_of_death (get_death p)) )
              (Adef.od_of_cdate (get_baptism p)) )
         (Adef.od_of_cdate (get_birth p))
   end
 
-let is_restricted (conf : config) base ip =
+let is_restricted (conf : config) base (ip : iper) =
   let fct p =
     not (is_quest_string (get_surname p)) &&
     not (is_quest_string (get_first_name p)) &&
     not (authorized_age conf base p)
   in
-  if conf.use_restrict then base_visible_get base fct (Adef.int_of_iper ip)
+  if conf.use_restrict then base_visible_get base fct ip
   else false
 
 let pget (conf : config) base ip =
@@ -731,12 +720,15 @@ let pget (conf : config) base ip =
 let string_gen_person base p = Futil.map_person_ps (fun p -> p) (sou base) p
 
 let string_gen_family base fam =
-  Futil.map_family_ps (fun p -> p) (sou base) fam
+  Futil.map_family_ps (fun p -> p) (fun f -> f) (sou base) fam
 
 let is_hidden p = is_empty_string (get_surname p)
 
-let know base p =
-  sou base (get_first_name p) <> "?" || sou base (get_surname p) <> "?"
+let is_empty_name p =
+  (Gwdb.is_empty_string (Gwdb.get_surname p) ||
+   Gwdb.is_quest_string (Gwdb.get_surname p)) &&
+  (Gwdb.is_empty_string (Gwdb.get_first_name p) ||
+   Gwdb.is_quest_string (Gwdb.get_first_name p))
 
 let is_public conf base p =
   get_access p = Public ||
@@ -788,7 +780,7 @@ let acces_n conf base n x =
     (if get_occ x <> 0 then "&oc" ^ n ^ "=" ^ string_of_int (get_occ x)
      else "")
   else
-    "i" ^ n ^ "=" ^ string_of_int (Adef.int_of_iper (get_key_index x)) ^
+    "i" ^ n ^ "=" ^ string_of_iper (get_iper x) ^
     (if conf.wizard && get_occ x <> 0 then
        "&oc" ^ n ^ "=" ^ string_of_int (get_occ x)
      else "")
@@ -1016,12 +1008,12 @@ let wprint_geneweb_link conf href s =
   Wserver.printf "%s" (geneweb_link conf href s)
 
 let reference conf base p s =
-  let iper = get_key_index p in
+  let iper = get_iper p in
   if conf.cancel_links || is_hidden p then s
   else
     String.concat ""
       ["<a href=\""; commd conf; acces conf base p; "\" id=\"i";
-       string_of_int (Adef.int_of_iper iper); "\">"; s; "</a>"]
+       string_of_iper iper; "\">"; s; "</a>"]
 
 
 (* ************************************************************************* *)
@@ -1043,7 +1035,7 @@ let reference conf base p s =
 let update_family_loop conf base p s =
   if conf.cancel_links || is_hidden p then s
   else
-    let iper = get_key_index p in
+    let iper = get_iper p in
     let list = get_family p in
     let list = Array.map (fun ifam -> ifam, get_children (foi base ifam)) list in
     let res =
@@ -1053,12 +1045,12 @@ let update_family_loop conf base p s =
     in
     if conf.wizard then
       if List.length res = 1 then
-        let iper = string_of_int (Adef.int_of_iper iper) in
-        let ifam = string_of_int (Adef.int_of_ifam (List.hd res)) in
+        let iper = string_of_iper iper in
+        let ifam = string_of_ifam (List.hd res) in
         "<a href=\"" ^ commd conf ^ "m=MOD_FAM&i=" ^ ifam ^ "&ip=" ^ iper ^
         "\">" ^ s ^ "</a>"
       else
-        let iper = string_of_int (Adef.int_of_iper iper) in
+        let iper = string_of_iper iper in
         "<a href=\"" ^ commd conf ^ "m=U&i=" ^ iper ^ "\">" ^ s ^ "</a>"
     else s
 
@@ -1206,9 +1198,8 @@ let string_of_pevent_name conf base epers_name =
   | Epers_Will -> transl conf "will"
   | Epers_Name n -> sou base n
 
-let string_of_fevent_name conf base efam_name =
-  match efam_name with
-    Efam_Marriage -> transl conf "marriage event"
+let string_of_fevent_name conf base = function
+  | Efam_Marriage -> transl conf "marriage event"
   | Efam_NoMarriage -> transl conf "no marriage event"
   | Efam_NoMention -> transl conf "no mention"
   | Efam_Engage -> transl conf "engage event"
@@ -1221,6 +1212,10 @@ let string_of_fevent_name conf base efam_name =
   | Efam_PACS -> transl conf "PACS"
   | Efam_Residence -> transl conf "residence"
   | Efam_Name n -> sou base n
+
+let string_of_fevent conf base = function
+  | Efam_NoMention -> transl conf "no mention"
+  | x -> string_of_fevent_name conf base x
 
 let string_of_witness_kind conf sex witness_kind =
   match witness_kind with
@@ -1331,18 +1326,19 @@ let open_hed_trl conf fname =
   try Some (Secure.open_in (etc_file_name conf fname)) with
     Sys_error _ -> None
 
-let open_templ conf fname =
-  try Some (Secure.open_in (etc_file_name conf fname)) with
+let open_templ_fname conf fname =
+  try
+    let fname = etc_file_name conf fname in
+    Some (Secure.open_in fname, fname) with
     Sys_error _ ->
-      if true then
-        let std_fname =
-          search_in_lang_path (Filename.concat "etc" (fname ^ ".txt"))
-        in
-        try Some (Secure.open_in std_fname) with Sys_error _ -> None
-      else None
+      let std_fname =
+        search_in_lang_path (Filename.concat "etc" (fname ^ ".txt"))
+      in
+      try Some (Secure.open_in std_fname, std_fname) with Sys_error _ -> None
+
+let open_templ conf fname = Opt.map fst (open_templ_fname conf fname)
 
 let image_prefix conf = conf.image_prefix
-
 
 (*
    On cherche le fichier dans cet ordre :
@@ -1400,9 +1396,9 @@ let url_no_index conf base =
   let scratch s = code_varenv (Name.lower (sou base s)) in
   let get_a_person v =
     try
-      let i = int_of_string v in
-      if i >= 0 && i < nb_of_persons base then
-        let p = pget conf base (Adef.iper_of_int i) in
+      let i = iper_of_string v in
+      (* if i >= 0 && i < nb_of_persons base then *)
+        let p = pget conf base i in
         if is_hide_names conf p && not (authorized_age conf base p) ||
            is_hidden p
         then
@@ -1411,33 +1407,29 @@ let url_no_index conf base =
           let f = scratch (get_first_name p) in
           let s = scratch (get_surname p) in
           let oc = string_of_int (get_occ p) in Some (f, s, oc)
-      else None
+      (* else None *)
     with Failure _ -> None
   in
   let get_a_family v =
     try
-      let i = int_of_string v in
-        if i >= 0 && i < nb_of_families base then
-          let fam = foi base (Adef.ifam_of_int i) in
-          if is_deleted_family fam then None
-          else
-            let p = pget conf base (get_father fam) in
-            let f = scratch (get_first_name p) in
-            let s = scratch (get_surname p) in
-            if f = "" || s = "" then None
-            else
-              let oc = string_of_int (get_occ p) in
-              let u = pget conf base (get_father fam) in
-              let n =
-                let rec loop k =
-                  if (get_family u).(k) = Adef.ifam_of_int i then
-                    string_of_int k
-                  else loop (k + 1)
-                in
-                loop 0
-              in
-              Some (f, s, oc, n)
-        else None
+      let i = ifam_of_string v in
+      let fam = foi base i in
+      let p = pget conf base (get_father fam) in
+      let f = scratch (get_first_name p) in
+      let s = scratch (get_surname p) in
+      if f = "" || s = "" then None
+      else
+        let oc = string_of_int (get_occ p) in
+        let u = pget conf base (get_father fam) in
+        let n =
+          let rec loop k =
+            if (get_family u).(k) = i then
+              string_of_int k
+            else loop (k + 1)
+          in
+          loop 0
+        in
+        Some (f, s, oc, n)
     with Failure _ -> None
   in
   let env =
@@ -2095,11 +2087,25 @@ let print_alphab_list crit print_elem liste =
 let relation_txt conf sex fam =
   let is = index_of_sex sex in
   match get_relation fam with
-    NotMarried | NoSexesCheckNotMarried ->
-      ftransl_nth conf "relationship%t to" is
-  | Married | NoSexesCheckMarried -> ftransl_nth conf "married%t to" is
-  | Engaged -> ftransl_nth conf "engaged%t to" is
-  | NoMention -> let s = "%t " ^ transl conf "with" in valid_format "%t" s
+  | NotMarried
+  | NoSexesCheckNotMarried ->
+    ftransl_nth conf "relationship%t to" is
+  | MarriageContract  ->
+    ftransl_nth conf "marriage contract%t with" is
+  | MarriageLicense
+  | Married
+  | NoSexesCheckMarried ->
+    ftransl_nth conf "married%t to" is
+  | Engaged ->
+    ftransl_nth conf "engaged%t to" is
+  | MarriageBann ->
+    ftransl_nth conf "marriage banns%t to" is
+  | Pacs ->
+    ftransl_nth conf "pacsed%t to" is
+  | Residence ->
+    ftransl_nth conf "residence%t to" is
+  | NoMention ->
+    "%t" ^^ ftransl conf "with"
 
 let relation_date conf fam =
   match Adef.od_of_cdate (get_marriage fam) with
@@ -2130,7 +2136,7 @@ let child_of_parent conf base p =
       person_text conf base fath
     else gen_person_text (p_first_name, (fun _ _ -> "")) conf base fath
   in
-  let a = pget conf base (get_key_index p) in
+  let a = pget conf base (get_iper p) in
   let ifam =
     match get_parents a with
       Some ifam ->
@@ -2182,9 +2188,9 @@ let husband_wife conf base p all =
     let rec loop i =
       if i < Array.length (get_family p) then
         let fam = foi base (get_family p).(i) in
-        let conjoint = Gutil.spouse (get_key_index p) fam in
+        let conjoint = Gutil.spouse (get_iper p) fam in
         let conjoint = pget conf base conjoint in
-        if know base conjoint
+        if not @@ is_empty_name conjoint
         then
           translate_eval (Printf.sprintf (relation_txt conf (get_sex p) fam) (fun () -> ""))
         else loop (i + 1)
@@ -2196,9 +2202,9 @@ let husband_wife conf base p all =
     let rec loop i res =
       if i < Array.length (get_family p) then
         let fam = foi base (get_family p).(i) in
-        let conjoint = Gutil.spouse (get_key_index p) fam in
+        let conjoint = Gutil.spouse (get_iper p) fam in
         let conjoint = pget conf base conjoint in
-        if know base conjoint
+        if not @@ is_empty_name conjoint
         then
           if all then
             loop (i + 1) (res ^ translate_eval (" " ^
@@ -2328,7 +2334,7 @@ let get_approx_birth_date_place conf base p =
   get_approx_date_place birth birth_place baptism baptism_place
 
 let get_approx_death_date_place conf base p =
-  let death = CheckItem.date_of_death (get_death p) in
+  let death = Date.date_of_death (get_death p) in
   let death_place = string_of_place conf (sou base (get_death_place p)) in
   let buri =
     match get_burial p with
@@ -2467,12 +2473,12 @@ let limited_image_size max_wid max_hei fname size =
   | None -> None
 
 let find_person_in_env conf base suff =
-  match p_getint conf.env ("i" ^ suff) with
+  match p_getenv conf.env ("i" ^ suff) with
     Some i ->
-      if i >= 0 && i < nb_of_persons base then
-        let p = pget conf base (Adef.iper_of_int i) in
+      (* if i >= 0 && i < nb_of_persons base then *)
+        let p = pget conf base (Gwdb.iper_of_string i) in
         if is_hidden p then None else Some p
-      else None
+      (* else None *)
   | None ->
       match
         p_getenv conf.env ("p" ^ suff), p_getenv conf.env ("n" ^ suff)
@@ -2527,13 +2533,13 @@ let write_default_sosa conf key =
   let fname = base_path [] (conf.bname ^ ".gwf") in
   let tmp_fname = fname ^ "2" in
   let oc =
-    try Pervasives.open_out tmp_fname with
+    try Stdlib.open_out tmp_fname with
       Sys_error _ -> failwith "the gwf database is not writable"
   in
-  List.iter (fun (k, v) -> Pervasives.output_string oc (k ^ "=" ^ v ^ "\n"))
+  List.iter (fun (k, v) -> Stdlib.output_string oc (k ^ "=" ^ v ^ "\n"))
     gwf;
   close_out oc;
-  rm (fname ^ "~") ;
+  Mutil.rm (fname ^ "~") ;
   Sys.rename fname (fname ^ "~") ;
   try Sys.rename tmp_fname fname with Sys_error _ -> ()
 
@@ -2555,7 +2561,7 @@ let create_topological_sort conf base =
       let () = load_ascends_array base in
       let () = load_couples_array base in
       Consang.topological_sort base (pget conf)
-  | Some "no_tstab" -> Array.make (nb_of_persons base) 0
+  | Some "no_tstab" -> Gwdb.iper_marker (Gwdb.ipers base) 0
   | _ ->
       let bfile = base_path [] (conf.bname ^ ".gwb") in
       Lock.control (Mutil.lock_file bfile) false
@@ -2571,16 +2577,24 @@ let create_topological_sort conf base =
            in
            let r =
              try
-               let ic = Secure.open_in_bin tstab_file in
-               let r =
-                 try Some (Marshal.from_channel ic)
-                 with End_of_file | Failure _ -> None
-               in
-               close_in ic; r
-             with Sys_error _ -> None
+               (* Let's invalidate tstab if it is too old. *)
+               if Unix.time () -. (Unix.stat tstab_file).Unix.st_mtime > 86400. (* one day *)
+               then (Sys.remove tstab_file ; None)
+               else
+                 let ic = Secure.open_in_bin tstab_file in
+                 let r =
+                   try Some (Marshal.from_channel ic)
+                   with End_of_file | Failure _ ->
+                     (* tstab is probably corrupted *)
+                     Sys.remove tstab_file ;
+                     None
+                 in
+                 close_in ic;
+                 r
+             with _ -> None
            in
            match r with
-             Some tstab -> tstab
+           | Some tstab -> tstab
            | None ->
              let () = load_ascends_array base in
              let () = load_couples_array base in
@@ -2589,44 +2603,66 @@ let create_topological_sort conf base =
              then
                base_visible_write base;
              begin
-               try
-                 let oc = Secure.open_out_bin tstab_file in
-                 Marshal.to_channel oc tstab [Marshal.No_sharing];
-                 close_out oc
-               with Sys_error _ -> ()
+               let oc = Secure.open_out_bin tstab_file in
+               Marshal.to_channel oc tstab
+                 [ Marshal.No_sharing ; Marshal.Closures ] ;
+               close_out oc
              end;
              tstab)
 
-let branch_of_sosa conf base ip n =
-  if Sosa.eq n Sosa.zero then invalid_arg "branch_of_sosa";
-  let rec expand bl n =
-    if Sosa.eq n Sosa.one then bl
-    else expand (Sosa.even n :: bl) (Sosa.half n)
+let p_of_sosa conf base sosa p0 =
+  let path = Sosa.branches sosa in
+  let rec aux acc = function
+    | [] -> Some acc
+    | hd :: tl ->
+      match get_parents acc with
+      | Some ifam ->
+        let cpl = foi base ifam in
+        if hd = 0
+        then aux (pget conf base (get_father cpl)) tl
+        else aux (pget conf base (get_mother cpl)) tl
+      | None -> None
   in
-  let rec loop ipl ip sp =
-    function
-      [] -> Some ((ip, sp) :: ipl)
-    | goto_fath :: nl ->
-        match get_parents (pget conf base ip) with
-          Some ifam ->
-            let cpl = foi base ifam in
-            if goto_fath then loop ((ip, sp) :: ipl) (get_father cpl) Male nl
-            else loop ((ip, sp) :: ipl) (get_mother cpl) Female nl
-        | _ -> None
+  aux p0 path
+
+let branch_of_sosa conf base sosa p =
+  if Sosa.eq sosa Sosa.zero then invalid_arg "branch_of_sosa";
+  let rec expand bl sosa =
+    if Sosa.eq sosa Sosa.one then bl
+    else expand (Sosa.even sosa :: bl) (Sosa.half sosa)
   in
-  loop [] ip (get_sex (pget conf base ip)) (expand [] n)
+  let rec loop pl p = function
+    | [] -> Some (p :: pl)
+    | male :: tl ->
+      match get_parents p with
+      | Some ifam ->
+        let cpl = foi base ifam in
+        if male then loop (p :: pl) (pget conf base @@ get_father cpl) tl
+        else loop (p :: pl) (pget conf base @@ get_mother cpl) tl
+      | _ -> None
+  in
+  loop [] p (expand [] sosa)
 
 let sosa_of_branch ipl =
   if ipl = [] then failwith "sosa_of_branch";
   let ipl = List.tl (List.rev ipl) in
   List.fold_left
-    (fun b (_ip, sp) ->
+    (fun b p ->
        let b = Sosa.twice b in
-       match sp with
-         Male -> b
+       match get_sex p with
+       | Male -> b
        | Female -> Sosa.inc b 1
        | Neuter -> assert false)
     Sosa.one ipl
+
+(* FIXME: remove this and use sosa_of_branch only *)
+let old_sosa_of_branch conf base (ipl : (iper * sex) list) =
+  sosa_of_branch (List.map (fun (ip, _) -> pget conf base ip) ipl)
+
+(* FIXME: remove this and use branch_of_sosa only *)
+let old_branch_of_sosa conf base ip sosa =
+  branch_of_sosa conf base sosa (pget conf base ip)
+  |> Opt.map @@ List.map (fun p -> get_iper p, get_sex p)
 
 let space_to_unders = Mutil.tr ' ' '_'
 
@@ -2806,7 +2842,7 @@ let wprint_hidden_person conf base pref p =
     end
   else
     wprint_hidden conf pref "i"
-      (string_of_int (Adef.int_of_iper (get_key_index p)))
+      (string_of_iper (get_iper p))
 
 exception Ok
 
@@ -2818,7 +2854,7 @@ let has_nephews_or_nieces conf base p =
         let fam = foi base ifam in
         Array.iter
           (fun ip ->
-             if ip = get_key_index p then ()
+             if ip = get_iper p then ()
              else
                Array.iter
                  (fun ifam ->
@@ -3156,90 +3192,6 @@ let html_highlight case_sens h s =
       | None -> loop false (i + 1) (Buff.store len s.[i])
   in
   loop false 0 0
-
-(* Wrapper to pretty print the produced XHTML (see Wserver.wrap_string) *)
-
-let b = Buffer.create 80
-let ind_bol = ref 0
-let ind_curr = ref 0
-let bol = ref false
-let after_less = ref false
-let after_slash = ref false
-let curr_tag = ref None
-let stack_in_error = ref false
-let tag_stack = ref []
-let check_tag_stack c =
-  if !stack_in_error then ()
-  else
-    match !curr_tag with
-      Some (tag1, topen, tag_found) ->
-        begin match c with
-          ' ' -> curr_tag := Some (tag1, topen, true)
-        | '>' ->
-            if topen then
-              begin tag_stack := tag1 :: !tag_stack; curr_tag := None end
-            else
-              begin match !tag_stack with
-                tag2 :: rest ->
-                  if tag1 = tag2 then
-                    begin tag_stack := rest; curr_tag := None end
-                  else
-                    begin
-                      Printf.eprintf "Tag <%s> ended by </%s>\n" tag2 tag1;
-                      stack_in_error := true
-                    end
-              | [] ->
-                  Printf.eprintf "Ending tag not opened </%s>\n" tag1;
-                  stack_in_error := true
-              end
-        | c ->
-            if tag_found then ()
-            else curr_tag := Some (tag1 ^ String.make 1 c, topen, false)
-        end
-    | None -> ()
-let xml_pretty_print s =
-  let rec loop i =
-    if i = String.length s then ""
-    else if !bol then
-      if s.[i] = ' ' || s.[i] = '\n' then loop (i + 1)
-      else begin bol := false; loop i end
-    else
-      match s.[i] with
-        '\n' ->
-          check_tag_stack ' ';
-          let ind = min !ind_bol !ind_curr in
-          let line = Buffer.contents b in
-          bol := true;
-          ind_bol := !ind_curr;
-          Buffer.clear b;
-          String.make (max 0 ind) ' ' ^ line ^ "\n" ^ loop (i + 1)
-      | c ->
-          let after_less_v = !after_less in
-          let after_slash_v = !after_slash in
-          after_less := false;
-          after_slash := false;
-          begin match c with
-            '<' -> after_less := true; curr_tag := Some ("", true, false)
-          | '/' ->
-              if after_less_v then
-                begin
-                  ind_curr := !ind_curr - 2;
-                  curr_tag := Some ("", false, false)
-                end
-              else after_slash := true
-          | '!' -> curr_tag := None
-          | '>' ->
-              if after_slash_v then
-                begin ind_curr := !ind_curr - 2; curr_tag := None end
-              else check_tag_stack c
-          | c ->
-              check_tag_stack c;
-              if after_less_v then ind_curr := !ind_curr + 2
-          end;
-          Buffer.add_char b c;
-          loop (i + 1)
-  in
-  loop 0
 
 (* Print list in columns with Gutil.alphabetic order *)
 
@@ -3597,17 +3549,14 @@ let record_visited conf ip =
     [Rem] : Non exporté en clair hors de ce module.                         *)
 (* ************************************************************************ *)
 let init_cache_info conf base =
-  let nb_ind = Gwdb.nb_of_persons base in
   (* Reset le nombre réel de personnes d'une base. *)
-  let nb_real_persons = ref 0 in
-  for i = 0 to nb_ind - 1 do
-    let ip = Adef.iper_of_int i in
-    let p = poi base ip in
-    if know base p then incr nb_real_persons else ()
-  done;
+  let nb_real_persons =
+    Gwdb.Collection.fold
+      (fun i p -> if not @@ is_empty_name p then i + 1 else i) 0 (Gwdb.persons base)
+  in
   let () =
-    Hashtbl.add ht_cache_info cache_nb_base_persons
-      (string_of_int !nb_real_persons)
+    Hashtbl.add
+      ht_cache_info cache_nb_base_persons (string_of_int nb_real_persons)
   in
   write_cache_info conf
 
@@ -3672,17 +3621,6 @@ let groupby ~key ~value list =
     list ;
   Hashtbl.fold (fun k v acc -> (k, v) :: acc) h []
 
-(* FIXME: merge this en Mutil.tr *)
-let str_replace ?(unsafe = false) c ~by str =
-  match String.rindex_opt str c with
-  | None -> str
-  | Some _ ->
-    let bytes = Bytes.(if unsafe then unsafe_of_string else of_string) str in
-    for i = 0 to Bytes.length bytes - 1 do
-      if Bytes.unsafe_get bytes i = c then Bytes.unsafe_set bytes i by
-    done ;
-    Bytes.(if unsafe then unsafe_to_string else to_string) bytes
-
 let str_nth_pos str nth =
   let strlen = String.length str in
   let rec loop n i =
@@ -3732,22 +3670,14 @@ let init_cache_info bname base =
   | (_, _, _, None) ->
     begin
       (* Reset le nombre réel de personnes d'une base. *)
-      let nb_real_persons = ref 0 in
-      let nb_ind = Gwdb.nb_of_persons base in
-      let is_empty_name p =
-        (Gwdb.is_empty_string (Gwdb.get_surname p) ||
-         Gwdb.is_quest_string (Gwdb.get_surname p)) &&
-        (Gwdb.is_empty_string (Gwdb.get_first_name p) ||
-         Gwdb.is_quest_string (Gwdb.get_first_name p))
+      let nb_real_persons =
+        Gwdb.Collection.fold begin fun acc p ->
+          if is_empty_name p then acc else acc + 1
+        end 0 (Gwdb.persons base)
       in
-      for i = 0 to nb_ind - 1 do
-        let ip = Adef.iper_of_int i in
-        let p = Gwdb.poi base ip in
-        if is_empty_name p then () else incr nb_real_persons
-      done;
       let ht = Hashtbl.create 1 in
       let () =
-        Hashtbl.add ht cache_nb_base_persons (string_of_int !nb_real_persons)
+        Hashtbl.add ht cache_nb_base_persons (string_of_int nb_real_persons)
       in
       let bdir =
         if Filename.check_suffix bname ".gwb" then bname else bname ^ ".gwb"

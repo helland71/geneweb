@@ -2,6 +2,7 @@
 (* Copyright (c) 1998-2007 INRIA *)
 
 open Def
+open Gwdb
 
 let magic_gwo = "GnWo000o"
 
@@ -13,7 +14,7 @@ type key = { pk_first_name : string; pk_surname : string; pk_occ : int }
 
 type somebody =
     Undefined of key
-  | Defined of (iper, string) gen_person
+  | Defined of (iper, iper, string) gen_person
 
 type gw_syntax =
     Family of
@@ -21,8 +22,8 @@ type gw_syntax =
         (string gen_fam_event_name * cdate * string * string * string *
            string * (somebody * sex * witness_kind) list)
           list *
-        ((iper, string) gen_person, string) gen_family *
-        (iper, string) gen_person gen_descend
+        ((iper, iper, string) gen_person, ifam, string) gen_family *
+        (iper, iper, string) gen_person gen_descend
   | Notes of key * string
   | Relations of somebody * sex * (somebody, string) gen_relation list
   | Pevent of
@@ -603,27 +604,42 @@ let get_mar_date str =
         | _ -> failwith str
       in
       let (relation, l) =
+        let decode_sex v c l =
+          let decode_sex i =
+            match c.[i] with
+            | 'm' -> Male
+            | 'f' -> Female
+            | '?' -> Neuter
+            | _ -> failwith __LOC__
+          in
+          try (v, decode_sex 0, decode_sex 1), l
+          with _ -> (v, Male, Female), c :: l
+        in
         match l with
-          "#nm" :: l -> (NotMarried, Male, Female), l
-        | "#eng" :: l -> (Engaged, Male, Female), l
+        | "#nm" :: l ->
+          (NotMarried, Male, Female), l
+        | "#eng" :: l ->
+          (Engaged, Male, Female), l
+        | "#noment" :: c :: l ->
+          decode_sex NoMention c l
+        | "#noment" :: l ->
+          (NoMention, Male, Female), l
         | "#nsck" :: c :: l when String.length c = 2 ->
-            let decode_sex i =
-              match c.[i] with
-                'm' -> Male
-              | 'f' -> Female
-              | _ -> Neuter
-            in
-            (NoSexesCheckNotMarried, decode_sex 0, decode_sex 1), l
+          decode_sex NoSexesCheckNotMarried c l
         | "#nsckm" :: c :: l when String.length c = 2 ->
-            let decode_sex i =
-              match c.[i] with
-                'm' -> Male
-              | 'f' -> Female
-              | _ -> Neuter
-            in
-            (NoSexesCheckMarried, decode_sex 0, decode_sex 1), l
-        | "#noment" :: l -> (NoMention, Male, Female), l
-        | _ -> (Married, Male, Female), l
+          decode_sex NoSexesCheckMarried c l
+        | "#banns" :: c :: l when String.length c = 2 ->
+          decode_sex MarriageBann c l
+        | "#contract" :: c :: l when String.length c = 2 ->
+          decode_sex MarriageContract c l
+        | "#license" :: c :: l when String.length c = 2 ->
+          decode_sex MarriageLicense c l
+        | "#pacs" :: c :: l when String.length c = 2 ->
+          decode_sex Pacs c l
+        | "#residence" :: c :: l when String.length c = 2 ->
+          decode_sex Residence c l
+        | _ ->
+          (Married, Male, Female), l
       in
       let (place, l) = get_field "#mp" l in
       let (note, l) = get_field "#mn" l in
@@ -654,7 +670,7 @@ let create_person () =
    baptism_src = ""; death = DontKnowIfDead; death_place = "";
    death_note = ""; death_src = ""; burial = UnknownBurial; burial_place = "";
    burial_note = ""; burial_src = ""; pevents = []; notes = ""; psources = "";
-   key_index = Adef.iper_of_int (-1)}
+   key_index = Gwdb.dummy_iper}
 
 let bogus_def p n = p = "?" || n = "?"
 
@@ -985,7 +1001,7 @@ let read_family ic fname =
              marriage_note = marr_note; marriage_src = marr_src;
              witnesses = [| |]; relation = relation; divorce = divorce;
              fevents = []; comment = comm; origin_file = fname;
-             fsources = fsrc; fam_index = Adef.ifam_of_int (-1)}
+             fsources = fsrc; fam_index = Gwdb.dummy_ifam}
           in
           let deo = {children = Array.of_list cles_enfants} in
           F_some
@@ -997,7 +1013,7 @@ let read_family ic fname =
              marriage_note = marr_note; marriage_src = marr_src;
              witnesses = [| |]; relation = relation; divorce = divorce;
              fevents = []; comment = comm; origin_file = fname;
-             fsources = fsrc; fam_index = Adef.ifam_of_int (-1)}
+             fsources = fsrc; fam_index = Gwdb.dummy_ifam}
           in
           let deo = {children = [| |]} in
           F_some
@@ -1131,7 +1147,7 @@ let comp_families x =
     loop (read_line (ic, E_iso_8859_1)) E_iso_8859_1; close_in ic
   with e ->
     close_out oc;
-    Util.rm out_file;
+    Mutil.rm out_file;
     raise e
   end;
   close_out oc

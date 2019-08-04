@@ -14,81 +14,24 @@ DISTRIB_DIR=distribution
 
 BUILD_DIR=_build/default
 
-###### [BEGIN] Executables list
-
-INSTALL_EXE = \
-	bin/distrib/connex \
-	bin/distrib/ged2gwb \
-	bin/distrib/ged2gwb2 \
-	bin/distrib/gwb2ged \
-	bin/distrib/gwc1 \
-	bin/distrib/gwc2 \
-	bin/distrib/gwd \
-	bin/distrib/gwdiff \
-	bin/distrib/gwtp \
-	bin/distrib/gwu \
-	bin/distrib/mk_consang \
-	bin/distrib/setup \
-	bin/distrib/update_nldb
-
-ALL_EXE = \
-	$(INSTALL_EXE) \
-	bin/contrib/gui/gui \
-	bin/contrib/gwFix/gwFindCpl \
-	bin/contrib/gwFix/gwFixBase \
-	bin/contrib/gwFix/gwFixBurial \
-	bin/contrib/gwFix/gwFixColon \
-	bin/contrib/gwFix/gwFixEvtSrc \
-	bin/contrib/gwFix/gwFixFromFile \
-	bin/contrib/gwFix/gwFixFromFileAlias \
-	bin/contrib/gwFix/gwFixFromFileDomicile \
-	bin/contrib/gwFix/gwFixY \
-	bin/contrib/gwbase/etc/public \
-	bin/contrib/gwbase/etc/public2 \
-	bin/contrib/gwpublic/gwiftitles \
-	bin/contrib/gwpublic/gwprivate \
-	bin/contrib/gwpublic/gwpublic \
-	bin/contrib/gwpublic/gwpublic1 \
-	bin/contrib/gwpublic/gwpublic2 \
-	bin/contrib/gwpublic/gwpublic2priv \
-	bin/contrib/history/convert_hist \
-	bin/contrib/history/fix_hist \
-	bin/contrib/history/is_gw_plus \
-	bin/contrib/lex/lex_utils \
-	bin/contrib/misc/lower_string \
-	bin/contrib/oneshot/gwBaseCompatiblePlus \
-	bin/contrib/oneshot/gwExportAscCSV \
-	bin/contrib/oneshot/gwFixDateText \
-	bin/contrib/oneshot/gwRemoveImgGallery
-
-EVERYTHING_EXE = \
-	$(ALL_EXE) \
-	bin/contrib/check_base/check_base \
-	bin/contrib/dag2html/main \
-	bin/contrib/gwbase/etc/chkimg \
-	bin/contrib/gwbase/etc/clavier \
-	bin/contrib/gwbase/etc/consmoy \
-	bin/contrib/gwbase/etc/geneanet \
-	bin/contrib/gwbase/etc/gwck \
-	bin/contrib/gwbase/etc/hist \
-	bin/contrib/gwbase/etc/lune \
-	bin/contrib/gwbase/etc/nbdesc \
-	bin/contrib/gwbase/etc/probot \
-	bin/contrib/gwbase/etc/selroy \
-	bin/contrib/gwbase/etc/titres \
-	bin/contrib/i18n_check/i18n_check \
-	bin/contrib/oneshot/gwFixAddEvent \
-	bin/contrib/oneshot/gwMostAsc
-
-###### [END] Executables list
+EXE = \
+	bin/distrib/connex.exe \
+	bin/distrib/consang.exe \
+	bin/distrib/ged2gwb.exe \
+	bin/distrib/gwb2ged.exe \
+	bin/distrib/gwc.exe \
+	bin/distrib/gwd.exe \
+	bin/distrib/gwdiff.exe \
+	bin/distrib/gwtp.exe \
+	bin/distrib/gwu.exe \
+	bin/distrib/setup.exe \
+	bin/distrib/update_nldb.exe \
 
 ###### [BEGIN] Generated files section
 
 CAMLP5_PA_EXTEND_FILES = \
 	bin/distrib/ged2gwb/ged2gwb \
-	bin/distrib/ged2gwb/ged2gwb2 \
 	lib/templ \
-	lib/update \
 	bin/distrib/setup/setup
 
 CAMLP5_Q_MLAST_FILES = \
@@ -101,7 +44,7 @@ $(CAMLP5_Q_MLAST_FILES:=.ml): CAMLP5_OPT += q_MLast.cmo
 
 %.ml: CAMLP5_OPT=
 
-%.ml: %.camlp5
+%.ml: %.camlp5.ml
 	@([ -z "$(CAMLP5_OPT)" ] \
 	|| false \
 	&& echo "ERROR generating $@: CAMLP5_OPT variable must be defined") \
@@ -119,21 +62,37 @@ lib/gwlib.ml:
 	echo "  try Sys.getenv \"GWPREFIX\"" >> $@
 	echo "  with Not_found -> \"$(PREFIX)\"" | sed -e 's|\\|/|g' >> $@
 
+CPPO_D=$(API_D) $(GWDB_D)
+
 %/dune: %/dune.in
-	sed -e "s/%%%API%%%/$(API)/g" -e "s/%%%API_DEP%%%/$(API_DEP)/g" $< > $@
+	cat $< \
+	| cppo -n $(CPPO_D) \
+	| sed \
+	-e "s/%%%CPPO_D%%%/$(CPPO_D)/g" \
+	-e "s/%%%API_PKG%%%/$(API_PKG)/g" \
+	-e "s/%%%SOSA_PKG%%%/$(SOSA_PKG)/g" \
+	-e "s/%%%GWDB_PKG%%%/$(GWDB_PKG)/g" \
+	-e "s/%%%DUNE_DIRS_EXCLUDE%%%/$(DUNE_DIRS_EXCLUDE)/g" \
+	> $@
 
 hd/etc/version.txt:
-	echo "GeneWeb [*version][:] %version; compiled on " > $@
-	echo "$$(date '+%Y-%m-%d')" >> $@
-	echo " from commit " >> $@
-	echo "$$(git show -s --date=short --pretty=format:'<a href="https://github.com/geneweb/geneweb/commit/%h">%h (%cd)</a>')" >> $@
+	echo "GeneWeb[:] [compiled on %s from commit %s:::" > $@
+	echo "$$(date '+%Y-%m-%d'):" >> $@
+	echo "$$(git show -s --date=short --pretty=format:'<a href="https://github.com/geneweb/geneweb/commit/%h">%h (%cd)</a>')]" >> $@
 .PHONY:hd/etc/version.txt
 
 ###### [End] Generated files section
 
-GENERATED_FILES_DEP = hd/etc/version.txt lib/gwlib.ml $(CAMLP5_FILES:=.ml) lib/dune
+GENERATED_FILES_DEP = \
+	hd/etc/version.txt \
+	lib/gwlib.ml \
+	$(CAMLP5_FILES:=.ml) \
+	benchmark/dune \
+	bin/distrib/dune \
+	lib/dune \
+	test/dune \
 
-ifdef API
+ifdef API_D
 piqi:
 	$(foreach p, $(wildcard lib/*.proto), \
 		piqi of-proto --normalize $(p) ; \
@@ -151,15 +110,11 @@ geneweb.install:
 
 %.exe: | piqi $(GENERATED_FILES_DEP)
 	dune build $@
-install-exe:
-	dune build $(INSTALL_EXE:=.exe)
 exe:
 	dune build $(ALL_EXE:=.exe)
-everything-exe:
-	dune build $(EVERYTHING_EXE:=.exe)
 .DEFAULT_GOAL = exe
 
-geneweb.install install-exe exe everything-exe: $(GENERATED_FILES_DEP) piqi
+geneweb.install exe: $(GENERATED_FILES_DEP) piqi
 
 ###### [BEGIN] Installation / Distribution section
 
@@ -171,7 +126,7 @@ uninstall: geneweb.install
 
 BUILD_DISTRIB_DIR=$(BUILD_DIR)/bin/distrib/
 
-distrib: install-exe
+distrib: exe
 	$(RM) -r $(DISTRIB_DIR)
 	mkdir $(DISTRIB_DIR)
 	mkdir -p $(DISTRIB_DIR)/bases
@@ -197,24 +152,20 @@ distrib: install-exe
 	cp etc/a.gwf $(DISTRIB_DIR)/gw/.
 	echo "127.0.0.1" > $(DISTRIB_DIR)/gw/only.txt
 	echo "-setup_link" > $(DISTRIB_DIR)/gw/gwd.arg
-	cp $(BUILD_DISTRIB_DIR)gwc1.exe $(DISTRIB_DIR)/gw/gwc$(EXE);
-	cp $(BUILD_DISTRIB_DIR)gwc1.exe $(DISTRIB_DIR)/gw/gwc1$(EXE);
-	cp $(BUILD_DISTRIB_DIR)gwc2.exe $(DISTRIB_DIR)/gw/gwc2$(EXE);
-	cp $(BUILD_DISTRIB_DIR)mk_consang.exe $(DISTRIB_DIR)/gw/consang$(EXE);
-	cp $(BUILD_DISTRIB_DIR)mk_consang.exe $(DISTRIB_DIR)/gw/mk_consang$(EXE);
-	cp $(BUILD_DISTRIB_DIR)gwd.exe $(DISTRIB_DIR)/gw/gwd$(EXE);
-	cp $(BUILD_DISTRIB_DIR)gwu.exe $(DISTRIB_DIR)/gw/gwu$(EXE);
-	cp $(BUILD_DISTRIB_DIR)ged2gwb.exe $(DISTRIB_DIR)/gw/ged2gwb$(EXE);
-	cp $(BUILD_DISTRIB_DIR)ged2gwb2.exe $(DISTRIB_DIR)/gw/ged2gwb2$(EXE);
-	cp $(BUILD_DISTRIB_DIR)gwb2ged.exe $(DISTRIB_DIR)/gw/gwb2ged$(EXE);
-	cp $(BUILD_DISTRIB_DIR)connex.exe $(DISTRIB_DIR)/gw/connex$(EXE);
-	cp $(BUILD_DISTRIB_DIR)gwdiff.exe $(DISTRIB_DIR)/gw/gwdiff$(EXE);
-	cp $(BUILD_DISTRIB_DIR)setup.exe $(DISTRIB_DIR)/gw/gwsetup$(EXE);
-	cp $(BUILD_DISTRIB_DIR)update_nldb.exe $(DISTRIB_DIR)/gw/update_nldb$(EXE);
+	cp $(BUILD_DISTRIB_DIR)gwc.exe $(DISTRIB_DIR)/gw/gwc$(EXT);
+	cp $(BUILD_DISTRIB_DIR)consang.exe $(DISTRIB_DIR)/gw/consang$(EXT);
+	cp $(BUILD_DISTRIB_DIR)gwd.exe $(DISTRIB_DIR)/gw/gwd$(EXT);
+	cp $(BUILD_DISTRIB_DIR)gwu.exe $(DISTRIB_DIR)/gw/gwu$(EXT);
+	cp $(BUILD_DISTRIB_DIR)ged2gwb.exe $(DISTRIB_DIR)/gw/ged2gwb$(EXT);
+	cp $(BUILD_DISTRIB_DIR)gwb2ged.exe $(DISTRIB_DIR)/gw/gwb2ged$(EXT);
+	cp $(BUILD_DISTRIB_DIR)connex.exe $(DISTRIB_DIR)/gw/connex$(EXT);
+	cp $(BUILD_DISTRIB_DIR)gwdiff.exe $(DISTRIB_DIR)/gw/gwdiff$(EXT);
+	cp $(BUILD_DISTRIB_DIR)setup.exe $(DISTRIB_DIR)/gw/gwsetup$(EXT);
+	cp $(BUILD_DISTRIB_DIR)update_nldb.exe $(DISTRIB_DIR)/gw/update_nldb$(EXT);
 	mkdir $(DISTRIB_DIR)/gw/gwtp_tmp
 	mkdir $(DISTRIB_DIR)/gw/gwtp_tmp/lang
 	cp bin/distrib/gwtp/README $(DISTRIB_DIR)/gw/gwtp_tmp/.
-	cp $(BUILD_DISTRIB_DIR)/gwtp.exe $(DISTRIB_DIR)/gw/gwtp_tmp/gwtp$(EXE)
+	cp $(BUILD_DISTRIB_DIR)/gwtp.exe $(DISTRIB_DIR)/gw/gwtp_tmp/gwtp$(EXT)
 	cp bin/distrib/gwtp/lang/*.txt $(DISTRIB_DIR)/gw/gwtp_tmp/lang/.
 	mkdir $(DISTRIB_DIR)/gw/setup
 	cp bin/distrib/setup/intro.txt $(DISTRIB_DIR)/gw/setup/
@@ -239,9 +190,13 @@ doc: | piqi $(GENERATED_FILES_DEP)
 	dune build @doc
 .PHONY: doc
 
-test: install-exe
+test: | piqi $(GENERATED_FILES_DEP)
 	dune build @runtest
 .PHONY: test
+
+bench: | piqi $(GENERATED_FILES_DEP)
+	dune build @runbench
+.PHONY: bench
 
 clean:
 	$(RM) $(GENERATED_FILES_DEP) lib/*_piqi*.ml

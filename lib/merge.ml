@@ -26,7 +26,7 @@ let print conf base p =
   let list =
     List.fold_right
       (fun p1 pl ->
-         if get_key_index p1 = get_key_index p then pl else p1 :: pl)
+         if get_iper p1 = get_iper p then pl else p1 :: pl)
       list []
   in
   Perso.interp_notempl_with_menu title "perso_header" conf base p;
@@ -37,8 +37,8 @@ let print conf base p =
 class=\"mx-3 mb-3\">\n" conf.command;
   Util.hidden_env conf;
   Wserver.printf "<input type=\"hidden\" name=\"m\" value=\"MRG_IND\">\n";
-  Wserver.printf "<input type=\"hidden\" name=\"i\" value=\"%d\">\n"
-    (Adef.int_of_iper (get_key_index p));
+  Wserver.printf "<input type=\"hidden\" name=\"i\" value=\"%s\">\n"
+    (string_of_iper (get_iper p));
   Wserver.printf "<span class=\"form-row align-items-center\">\n";
   Wserver.printf "<span class=\"col-auto\">\n";
   Wserver.printf "<span class=\"custom-control custom-radio\">\n";
@@ -62,10 +62,10 @@ size=\"50\" id=\"inlineinput\" autofocus>\n</span>\n"
          Wserver.printf "<div class=\"custom-control custom-radio\">\n";
          Wserver.printf
            "  <input type=\"radio\" class=\"custom-control-input\" \
-name=\"select\" id=\"%d\" value=\"%d\">\n" (Adef.int_of_iper (get_key_index p))
-(Adef.int_of_iper (get_key_index p));
+name=\"select\" id=\"%s\" value=\"%s\">\n" (string_of_iper (get_iper p))
+(string_of_iper (get_iper p));
          Wserver.printf "  <label class=\"custom-control-label\" \
-for=\"%d\">" (Adef.int_of_iper (get_key_index p));
+for=\"%s\">" (string_of_iper (get_iper p));
          Update.print_person_parents_and_spouse conf base p;
          Wserver.printf "  </label>\n</div>\n";)
     list;
@@ -77,23 +77,25 @@ for=\"%d\">" (Adef.int_of_iper (get_key_index p));
   Hutil.trailer conf
 
 let print_possible_continue_merging conf base =
-  match p_getint conf.env "ini1", p_getint conf.env "ini2" with
+  match p_getenv conf.env "ini1", p_getenv conf.env "ini2" with
     Some ini1, Some ini2 ->
-      let p1 = poi base (Adef.iper_of_int ini1) in
-      let p2 = poi base (Adef.iper_of_int ini2) in
-      Wserver.printf "\n";
-      html_p conf;
-      Wserver.printf "<a href=%sm=MRG_IND&i=%d&i2=%d>" (commd conf) ini1 ini2;
-      Wserver.printf "%s" (capitale (transl conf "continue merging"));
-      Wserver.printf "</a>";
-      Wserver.printf "\n";
+      let ini1 = iper_of_string ini1 in
+      let ini2 = iper_of_string ini2 in
+      let p1 = poi base ini1 in
+      let p2 = poi base ini2 in
+      Wserver.printf {|<p><a href="%sm=MRG_IND&i=%s&i2=%s">%s</a>\n|}
+        (commd conf)
+        (string_of_iper ini1)
+        (string_of_iper ini2)
+        (capitale (transl conf "continue merging"));
       print_someone base p1;
       Wserver.printf "\n%s\n" (transl_nth conf "and" 0);
       print_someone base p2;
-      Wserver.printf "\n"
+      Wserver.printf "</p>\n"
   | _ ->
-      match p_getint conf.env "ip" with
+      match p_getenv conf.env "ip" with
         Some ip ->
+          let ip = iper_of_string ip in
           let s1 =
             match p_getenv conf.env "iexcl" with
               Some "" | None -> ""
@@ -106,20 +108,13 @@ let print_possible_continue_merging conf base =
           in
           if s1 <> "" || s2 <> "" then
             begin
-              Wserver.printf "<p>\n";
-              Wserver.printf "<a href=%sm=MRG_DUP&ip=%d%s%s>" (commd conf)
-                ip s1 s2;
-              Wserver.printf "%s"
-                (capitale (transl conf "continue merging"));
-              Wserver.printf "</a>" ;
-              begin
-                let p = poi base (Adef.iper_of_int ip) in
-                let s = person_text conf base p in
-                Wserver.printf "\n(%s)\n"
-                  (transl_a_of_b conf
-                     (transl conf "possible duplications")
-                     (reference conf base p s) s)
-              end;
-              Wserver.printf "</p>\n"
+              let p = poi base ip in
+              let s = person_text conf base p in
+              Wserver.printf {|<p><a href="%sm=MRG_DUP&ip=%s%s%s">%s</a> (%s)</p>|}
+                (commd conf) (string_of_iper ip) s1 s2
+                (capitale (transl conf "continue merging"))
+                (transl_a_of_b conf
+                   (transl conf "possible duplications")
+                   (reference conf base p s) s)
             end
       | None -> ()

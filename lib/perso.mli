@@ -5,16 +5,10 @@ open Gwdb
 open Config
 
 type generation_person =
-    GP_person of Sosa.t * Adef.iper * Adef.ifam option
-  | GP_same of Sosa.t * Sosa.t * Adef.iper
+    GP_person of Sosa.t * iper * ifam option
+  | GP_same of Sosa.t * Sosa.t * iper
   | GP_interv of (Sosa.t * Sosa.t * (Sosa.t * Sosa.t) option) option
-  | GP_missing of Sosa.t * Adef.iper
-
-type sosa_t =
-  { tstab : int array;
-    mark : bool array;
-    mutable last_zil : (Def.iper * Sosa.t) list;
-    sosa_ht : (Def.iper, (Sosa.t * Gwdb.person) option) Hashtbl.t }
+  | GP_missing of Sosa.t * iper
 
 val string_of_marriage_text : config -> base -> family -> string
 val interp_templ : string -> config -> base -> person -> unit
@@ -37,7 +31,6 @@ val get_sosa_person : person -> Sosa.t
 val get_single_sosa : config -> base -> person -> Sosa.t
 val print_sosa : config -> base -> person -> bool -> unit
 
-val string_of_num : string -> Sosa.t -> string
 val get_linked_page : config -> base -> person -> string -> string
 val get_birth_text : config -> person -> bool -> string
 val get_baptism_text : config -> person -> bool -> string
@@ -56,13 +49,13 @@ val linked_page_text
   -> NotesLinks.page * ('b * ('a * NotesLinks.ind_link) list)
   -> string
 
-module IperSet : sig include Set.S with type elt = Adef.iper end
+module IperSet : sig include Set.S with type elt = iper end
 
-val max_ancestor_level : config -> base -> Adef.iper -> int -> int
+val max_ancestor_level : config -> base -> iper -> int -> int
 
 val string_of_died : config -> person -> bool -> string
 
-val string_of_parent_age : config -> base -> person * bool -> (family -> Adef.iper) -> string
+val string_of_parent_age : config -> base -> person * bool -> (family -> iper) -> string
 
 val string_of_image_url : config -> base -> person * bool -> bool -> string
 
@@ -76,26 +69,28 @@ val string_of_image_small_size : config -> base -> person * bool -> string
 
 val get_link : generation_person list -> IperSet.elt -> generation_person option
 
-val find_sosa
-  : config -> base -> person -> person option Lazy.t -> sosa_t -> (Sosa.t * Gwdb.person) option
-
 (**)
 
 val infinite : int
 val limit_desc : config -> int
-val make_desc_level_table :
-  config -> base -> int -> person -> int array * int array
+val make_desc_level_table
+  : config
+  -> base
+  -> int
+  -> person
+  -> (IperSet.elt, int) Gwdb.Marker.t * (ifam, int) Gwdb.Marker.t
+
 val default_max_cousin_lev : int
 
 type dup =
-    DupFam of Adef.ifam * Adef.ifam
-  | DupInd of Adef.iper * Adef.iper
+    DupFam of ifam * ifam
+  | DupInd of iper * iper
   | NoDup
 
-type excl_dup = (Adef.iper * Adef.iper) list * (Adef.ifam * Adef.ifam) list
+type excl_dup = (iper * iper) list * (ifam * ifam) list
 
 val excluded_possible_duplications : config -> excl_dup
-val first_possible_duplication : base -> Adef.iper -> excl_dup -> dup
+val first_possible_duplication : base -> iper -> excl_dup -> dup
 
 
 (* Ajout pour l'API *)
@@ -121,5 +116,5 @@ type event_name =
 val events_list :
   config -> base -> person ->
     (event_name * Def.cdate * istr * istr * istr *
-       (Def.iper * Def.witness_kind) array * Def.iper option)
+       (iper * Def.witness_kind) array * iper option)
       list

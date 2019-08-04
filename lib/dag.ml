@@ -33,10 +33,10 @@ let get_dag_elems conf base =
       Some p, Some s ->
         let set =
           match
-            Util.branch_of_sosa conf base (get_key_index p) (Sosa.of_string s)
+            Util.branch_of_sosa conf base (Sosa.of_string s) p
           with
             Some ipsl ->
-              List.fold_left (fun set (ip, _) -> Pset.add ip set) set ipsl
+              List.fold_left (fun set p -> Pset.add (get_iper p) set) set ipsl
           | None -> set
         in
         loop po set (i + 1)
@@ -229,7 +229,7 @@ let string_of_item conf base =
   function
     Item (p, s) ->
       Util.referenced_person_title_text conf base p ^
-      Date.short_dates_text conf base p ^ (if s = "" then "" else " " ^ s)
+      DateDisplay.short_dates_text conf base p ^ (if s = "" then "" else " " ^ s)
 
 (* Print with HTML table tags: <table> <tr> <td> *)
 
@@ -858,7 +858,7 @@ let make_tree_hts conf base elem_txt vbar_txt invert set spl d =
                let d =
                  match ifamo with
                    Some ifam ->
-                   Date.short_marriage_date_text conf base (foi base ifam)
+                   DateDisplay.short_marriage_date_text conf base (foi base ifam)
                      p ps
                  | None -> ""
                in
@@ -906,7 +906,7 @@ let print_slices_menu conf hts =
     (Templ.copy_from_templ conf conf.env)
     (Util.open_templ conf "buttons_rel") ;
   Wserver.printf "<form method=\"get\" action=\"%s\">\n" conf.command;
-  html_p conf;
+  Wserver.printf "<p>" ;
   hidden_env conf;
   List.iter
     (fun (k, v) ->
@@ -915,6 +915,7 @@ let print_slices_menu conf hts =
          Wserver.printf "<input type=\"hidden\" name=\"%s\" value=\"%s\">\n"
            (decode_varenv k) (decode_varenv v))
     conf.env;
+  Wserver.printf "</p>" ;
   Wserver.printf "<table>\n";
   Wserver.printf "<tr align=\"left\">\n";
   Wserver.printf "<td align=\"right\">\n";
@@ -947,11 +948,10 @@ let print_slices_menu conf hts =
   Wserver.printf "</td>\n";
   Wserver.printf "</tr>\n";
   Wserver.printf "</table>\n";
-  html_p conf;
+  Wserver.printf "<p>" ;
   Wserver.printf
-    "<button type=\"submit\" class=\"btn btn-secondary btn-lg\">\n";
-  Wserver.printf "%s" (capitale (transl_nth conf "validate/delete" 0));
-  Wserver.printf "</button>\n";
+    "<p><button type=\"submit\" class=\"btn btn-secondary btn-lg\">%s</button></p>"
+    (capitale (transl_nth conf "validate/delete" 0));
   Wserver.printf "</form>\n";
   Hutil.trailer conf
 
